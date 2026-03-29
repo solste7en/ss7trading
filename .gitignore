@@ -1,0 +1,44 @@
+# ── Credentials & secrets ──────────────────────────────────────────
+.env
+token.json
+*.pem
+*.key
+
+# ── Trade & position data (never commit) ───────────────────────────
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.csv
+*.xlsx
+*.json
+!package.json
+!package-lock.json
+
+# ── Logs ───────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Python ─────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+
+# ── macOS ──────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── IDE ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
