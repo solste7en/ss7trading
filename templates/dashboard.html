@@ -268,7 +268,8 @@
         <div class="form-group">
           <label>Ticker</label>
           <input type="text" id="lad-ticker" placeholder="NVDA" maxlength="10"
-                 onchange="loadLadderRecent()" onkeydown="if(event.key==='Enter') loadLadderRecent()">
+                 onchange="ladderRecentState.page=1; loadLadderRecent()"
+                 onkeydown="if(event.key==='Enter'){ ladderRecentState.page=1; loadLadderRecent(); }">
         </div>
         <div class="form-group">
           <label>Action</label>

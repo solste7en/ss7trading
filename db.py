@@ -104,22 +104,28 @@ def get_realized_gains(page=1, limit=25, ticker="", term=""):
 
 def get_top_tickers(top_n=10, recent_n=5):
     """
-    Return the top_n most-traded tickers with their last recent_n executed trades.
+    Return the top_n most-traded tickers with their last recent_n executed
+    *equity-only* trades (options excluded for clarity on the overview page).
     Uses a window function to avoid N+1 queries.
     """
     conn = _connect()
     cur = conn.cursor()
 
-    # Step 1: top N tickers by trade count
     cur.execute("""
-        SELECT underlying, COUNT(*) as cnt
+        SELECT underlying,
+               COUNT(*) as cnt,
+               SUM(CASE WHEN category = 'equity' THEN 1 ELSE 0 END) as equity_count,
+               SUM(CASE WHEN category = 'option' THEN 1 ELSE 0 END) as option_count
         FROM transactions
         WHERE category IN ('equity', 'option') AND underlying IS NOT NULL
         GROUP BY underlying
         ORDER BY cnt DESC
         LIMIT ?
     """, [top_n])
-    top = [(row["underlying"], row["cnt"]) for row in cur.fetchall()]
+    top = [
+        (row["underlying"], row["cnt"], row["equity_count"], row["option_count"])
+        for row in cur.fetchall()
+    ]
 
     if not top:
         conn.close()
@@ -127,20 +133,16 @@ def get_top_tickers(top_n=10, recent_n=5):
 
     placeholders = ",".join("?" for _ in top)
     symbols = [t[0] for t in top]
-    counts = {t[0]: t[1] for t in top}
 
-    # Step 2: last recent_n executed trades per ticker using ROW_NUMBER()
-    trade_actions = (
-        "'Buy','Sell','Sell Short','Buy to Cover',"
-        "'Buy to Open','Sell to Open','Buy to Close','Sell to Close'"
-    )
+    equity_actions = "'Buy','Sell','Sell Short','Buy to Cover'"
     cur.execute(f"""
         SELECT * FROM (
             SELECT underlying, trade_date, action, symbol, quantity, price, amount,
                    ROW_NUMBER() OVER (PARTITION BY underlying ORDER BY trade_date DESC, id DESC) as rn
             FROM transactions
             WHERE underlying IN ({placeholders})
-              AND action IN ({trade_actions})
+              AND action IN ({equity_actions})
+              AND category = 'equity'
         ) WHERE rn <= ?
         ORDER BY underlying, rn
     """, symbols + [recent_n])
@@ -162,10 +164,12 @@ def get_top_tickers(top_n=10, recent_n=5):
     conn.close()
 
     result = []
-    for sym, cnt in top:
+    for sym, cnt, eq_cnt, opt_cnt in top:
         result.append({
             "symbol": sym,
             "trade_count": cnt,
+            "equity_count": eq_cnt,
+            "option_count": opt_cnt,
             "recent_trades": trades_by_ticker.get(sym, []),
         })
 

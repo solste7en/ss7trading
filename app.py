@@ -178,7 +178,7 @@ def api_realized_gains():
 def api_top_tickers():
     """Return the 10 most-traded tickers with their last 5 executed trades."""
     try:
-        return jsonify(get_top_tickers(top_n=10, recent_n=5))
+        return jsonify(get_top_tickers(top_n=10, recent_n=10))
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 

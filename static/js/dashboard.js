@@ -33,6 +33,32 @@ function refreshCurrent() {
 
 // ── Overview (Top Tickers) ────────────────────────────────────────
 const overviewState = { loaded: false };
+const OVERVIEW_LIMIT = 10;
+
+function _overviewTradeRows(trades) {
+  if (!trades.length) return '<tr><td colspan="5" style="color:#64748b">No trades found</td></tr>';
+  return trades.map(r => {
+    const isBuy = (r.action||'').toLowerCase().includes('buy');
+    return `<tr>
+      <td style="color:#64748b;font-size:12px">${r.trade_date}</td>
+      <td class="${isBuy ? 'pos' : 'neg'}" style="font-size:12px">${esc(r.action)}</td>
+      <td style="font-size:12px">${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
+      <td style="font-size:12px">${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
+      <td class="${cls(r.amount)}" style="font-size:12px">${r.amount != null ? '$' + fmt(r.amount) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function _overviewPag(cur, total_pages, total, onclick) {
+  if (total_pages <= 1) return `<div class="pg-info" style="margin-top:6px">${total.toLocaleString()} trades</div>`;
+  const prev = cur <= 1 ? 'disabled' : '';
+  const next = cur >= total_pages ? 'disabled' : '';
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:4px">
+    <button class="pg-btn" ${prev} onclick="${onclick(cur-1)}">‹ Prev</button>
+    <span class="pg-info">Page ${cur} / ${total_pages} · ${total.toLocaleString()} trades</span>
+    <button class="pg-btn" ${next} onclick="${onclick(cur+1)}">Next ›</button>
+  </div>`;
+}
 
 async function loadOverview() {
   const container = document.getElementById('overview-content');
@@ -42,40 +68,136 @@ async function loadOverview() {
     if (data.error) throw new Error(data.error);
     overviewState.loaded = true;
 
-    container.innerHTML = '<div class="overview-grid">' + data.tickers.map(t => {
-      const rows = t.recent_trades.map(r => {
-        const isBuy = (r.action||'').toLowerCase().includes('buy');
-        const rowCls = isBuy ? 'pos' : 'neg';
-        return `<tr>
-          <td style="color:#64748b">${r.trade_date}</td>
-          <td class="${rowCls}">${esc(r.action)}</td>
-          <td>${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
-          <td>${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
-          <td class="${cls(r.amount)}">${r.amount != null ? '$' + fmt(r.amount) : '—'}</td>
-        </tr>`;
-      }).join('');
+    const cards = data.tickers.map(t => {
+      const countLabel = `${t.trade_count.toLocaleString()} trades `
+        + `<span style="color:#475569">(${(t.equity_count||0).toLocaleString()} equity`
+        + ` / ${(t.option_count||0).toLocaleString()} option)</span>`;
 
-      return `<div class="ticker-card">
+      const rows = _overviewTradeRows(t.recent_trades);
+      const hasNext = (t.equity_count || 0) > OVERVIEW_LIMIT;
+      const pag = `<div id="tpag-${t.symbol}" style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:4px">
+        <button class="pg-btn" disabled>‹ Prev</button>
+        <span class="pg-info">Page 1 · ${(t.equity_count||0).toLocaleString()} trades</span>
+        <button class="pg-btn" ${hasNext ? '' : 'disabled'} onclick="loadTickerPage('${t.symbol}',2)">Next ›</button>
+      </div>`;
+
+      return `<div class="ticker-card" id="tcard-${t.symbol}">
         <div class="ticker-card-header">
           <h3>${esc(t.symbol)}</h3>
-          <span class="trade-count">${t.trade_count.toLocaleString()} trades</span>
-          <button class="btn-ladder" onclick="openLadder('${esc(t.symbol)}')">Ladder</button>
+          <span class="trade-count">${countLabel}</span>
+          <button class="btn-ladder" onclick="openLadder('${t.symbol}')">Ladder</button>
         </div>
-        <table>
-          <thead><tr><th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="5" style="color:#64748b">No recent trades</td></tr>'}</tbody>
-        </table>
+        <div id="ttable-${t.symbol}">
+          <table><thead><tr><th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>
+          <tbody>${rows}</tbody></table>
+        </div>
+        ${(t.equity_count||0) > 0 ? pag : ''}
       </div>`;
-    }).join('') + '</div>';
+    }).join('');
+
+    const customCard = `<div class="ticker-card" id="custom-ticker-card">
+      <div class="ticker-card-header">
+        <h3 style="white-space:nowrap">Lookup ticker</h3>
+        <input type="text" id="custom-ticker-input" placeholder="e.g. AAPL" maxlength="10"
+          style="width:90px;background:#1a1d2e;border:1px solid #2d3148;border-radius:5px;
+                 color:#e2e8f0;padding:5px 8px;font-size:12px;outline:none;text-transform:uppercase"
+          onkeydown="if(event.key==='Enter') searchCustomTicker()">
+        <button class="btn-sm" onclick="searchCustomTicker()" style="padding:5px 10px">Search</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#94a3b8;cursor:pointer">
+          <input type="checkbox" id="custom-include-options" checked
+                 onchange="if(customTickerState.symbol) loadCustomTickerPage(1)"
+                 style="accent-color:#6366f1">
+          Include options
+        </label>
+      </div>
+      <div id="custom-ticker-result" style="color:#475569;font-size:12px">
+        Enter a ticker above to view its trade history.
+      </div>
+    </div>`;
+
+    container.innerHTML = '<div class="overview-grid">' + cards + customCard + '</div>';
   } catch(e) {
     container.innerHTML = '<div class="error">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function loadTickerPage(symbol, page) {
+  const tableDiv = document.getElementById('ttable-' + symbol);
+  const pagDiv   = document.getElementById('tpag-'   + symbol);
+  if (!tableDiv) return;
+  tableDiv.innerHTML = '<div class="loading" style="padding:10px">Loading…</div>';
+  try {
+    const params = new URLSearchParams({ ticker: symbol, category: 'equity', limit: OVERVIEW_LIMIT, page });
+    const res = await fetch('/api/transactions?' + params).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+    tableDiv.innerHTML =
+      '<table><thead><tr><th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>'
+      + '<tbody>' + _overviewTradeRows(res.data) + '</tbody></table>';
+    if (pagDiv) pagDiv.outerHTML = _overviewPag(res.page, res.pages, res.total, p => `loadTickerPage('${symbol}',${p})`);
+  } catch(e) {
+    tableDiv.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
   }
 }
 
 function openLadder(symbol) {
   switchTab('ladder');
   document.getElementById('lad-ticker').value = symbol;
+  ladderRecentState.page = 1;
   loadLadderRecent();
+}
+
+// ── Overview custom ticker lookup ─────────────────────────────────
+const customTickerState = { symbol: '', page: 1, pages: 1, total: 0 };
+
+async function searchCustomTicker() {
+  const sym = document.getElementById('custom-ticker-input').value.trim().toUpperCase();
+  if (!sym) return;
+  customTickerState.symbol = sym;
+  await loadCustomTickerPage(1);
+}
+
+async function loadCustomTickerPage(page) {
+  const sym = customTickerState.symbol;
+  if (!sym) return;
+  customTickerState.page = page;
+
+  const includeOpts = document.getElementById('custom-include-options').checked;
+  const resultDiv = document.getElementById('custom-ticker-result');
+  resultDiv.innerHTML = '<div class="loading" style="padding:10px">Loading ' + esc(sym) + '…</div>';
+  try {
+    const mainParams = { ticker: sym, limit: OVERVIEW_LIMIT, page };
+    if (!includeOpts) mainParams.category = 'equity';
+
+    const mainRes = await fetch('/api/transactions?' + new URLSearchParams(mainParams)).then(r => r.json());
+    if (mainRes.error) throw new Error(mainRes.error);
+
+    // Fetch both counts in parallel for the header
+    const [eqCount, optCount] = await Promise.all([
+      fetch('/api/transactions?' + new URLSearchParams({ ticker: sym, category: 'equity', limit: 10, page: 1 })).then(r => r.json()).then(r => r.total || 0),
+      fetch('/api/transactions?' + new URLSearchParams({ ticker: sym, category: 'option', limit: 10, page: 1 })).then(r => r.json()).then(r => r.total || 0),
+    ]);
+
+    const total = eqCount + optCount;
+    const countLabel = `${total.toLocaleString()} trades `
+      + `<span style="color:#475569">(${eqCount.toLocaleString()} equity`
+      + ` / ${optCount.toLocaleString()} option)</span>`;
+
+    const pag = _overviewPag(mainRes.page, mainRes.pages, mainRes.total, p => `loadCustomTickerPage(${p})`);
+
+    resultDiv.innerHTML =
+      `<div class="ticker-card-header" style="margin-bottom:10px">
+        <h3 style="font-size:18px;font-weight:700">${esc(sym)}</h3>
+        <span class="trade-count">${countLabel}</span>
+        <button class="btn-ladder" onclick="openLadder('${esc(sym)}')">Ladder</button>
+      </div>` +
+      '<table style="width:100%"><thead><tr><th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>'
+      + '<tbody>' + _overviewTradeRows(mainRes.data) + '</tbody></table>'
+      + pag;
+  } catch(e) {
+    resultDiv.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
+  }
 }
 
 // ── Positions ─────────────────────────────────────────────────────
@@ -534,30 +656,71 @@ function ladderScaleDown() {
   renderRungs();
 }
 
-async function loadLadderRecent() {
+const ladderRecentState = { page: 1, pages: 1, total: 0 };
+const LADDER_RECENT_LIMIT = 20;
+const LADDER_RECENT_ACTIONS = new Set([
+  'Buy','Sell','Sell Short','Buy to Cover',
+  'Buy to Open','Sell to Open','Buy to Close','Sell to Close'
+]);
+
+async function loadLadderRecent(page) {
   const ticker = document.getElementById('lad-ticker').value.trim().toUpperCase();
   const sidebar = document.getElementById('lad-recent');
-  if (!ticker) { sidebar.innerHTML = '<div style="color:#475569">Enter a ticker to see recent trades</div>'; return; }
+  if (!ticker) {
+    sidebar.innerHTML = '<div style="color:#475569">Enter a ticker to see recent trades</div>';
+    return;
+  }
+  if (page !== undefined) ladderRecentState.page = page;
   sidebar.innerHTML = '<div class="loading" style="padding:10px">Loading…</div>';
   try {
-    const params = new URLSearchParams({ ticker, category: 'equity', limit: 5, page: 1 });
+    const params = new URLSearchParams({
+      ticker,
+      limit: LADDER_RECENT_LIMIT,
+      page: ladderRecentState.page,
+    });
     const res = await fetch('/api/transactions?' + params).then(r => r.json());
     if (res.error) throw new Error(res.error);
-    if (!res.data.length) {
-      sidebar.innerHTML = '<div style="color:#475569">No recent equity trades for ' + esc(ticker) + '</div>';
+
+    ladderRecentState.pages = res.pages;
+    ladderRecentState.total = res.total;
+
+    const trades = res.data.filter(r => LADDER_RECENT_ACTIONS.has(r.action));
+
+    if (!trades.length && ladderRecentState.page === 1) {
+      sidebar.innerHTML = '<div style="color:#475569">No recent trades for ' + esc(ticker) + '</div>';
       return;
     }
-    sidebar.innerHTML = '<table style="width:100%"><thead><tr>' +
-      '<th>Date</th><th>Action</th><th>Qty</th><th>Price</th>' +
-      '</tr></thead><tbody>' + res.data.map(r => {
-        const isBuy = (r.action||'').toLowerCase().includes('buy');
-        return `<tr>
-          <td style="color:#64748b;font-size:11px">${r.trade_date}</td>
-          <td class="${isBuy ? 'pos' : 'neg'}" style="font-size:11px">${esc(r.action)}</td>
-          <td style="font-size:11px">${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
-          <td style="font-size:11px">${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
-        </tr>`;
-      }).join('') + '</tbody></table>';
+
+    const rows = trades.map(r => {
+      const isBuy = (r.action||'').toLowerCase().includes('buy');
+      const optBadge = r.option_type
+        ? `<span class="badge badge-${r.option_type}" style="font-size:10px">${r.option_type}</span>`
+        : '';
+      return `<tr>
+        <td style="color:#64748b;font-size:11px">${r.trade_date}</td>
+        <td class="${isBuy ? 'pos' : 'neg'}" style="font-size:11px">${esc(r.action)}</td>
+        <td style="font-size:11px">${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
+        <td style="font-size:11px">${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
+        <td style="font-size:11px">${optBadge}</td>
+        <td style="font-size:11px">${r.option_strike != null ? '$' + fmt(r.option_strike) : ''}</td>
+        <td style="font-size:11px;color:#64748b">${r.option_expiry || ''}</td>
+      </tr>`;
+    }).join('');
+
+    const cur = ladderRecentState.page, total_pages = ladderRecentState.pages;
+    const prevDisabled = cur <= 1 ? 'disabled' : '';
+    const nextDisabled = cur >= total_pages ? 'disabled' : '';
+    const pagination = total_pages > 1 ? `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px">
+        <button class="pg-btn" ${prevDisabled} onclick="loadLadderRecent(${cur - 1})">‹ Prev</button>
+        <span class="pg-info">Page ${cur} of ${total_pages} · ${res.total.toLocaleString()} trades</span>
+        <button class="pg-btn" ${nextDisabled} onclick="loadLadderRecent(${cur + 1})">Next ›</button>
+      </div>` : `<div class="pg-info" style="margin-top:6px">${res.total.toLocaleString()} trades</div>`;
+
+    sidebar.innerHTML =
+      '<table style="width:100%"><thead><tr>' +
+      '<th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Type</th><th>Strike</th><th>Expiry</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>' + pagination;
   } catch(e) {
     sidebar.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
   }
