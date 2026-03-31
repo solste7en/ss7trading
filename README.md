@@ -6,19 +6,31 @@ A personal trading dashboard and order management tool built on the Schwab API. 
 
 ## First-time setup
 
-### 1. Install dependencies
+### 1. Create a virtual environment (macOS/Linux)
 ```bash
-cd schwab_app
+# Create the virtual environment
+python3 -m venv venv
+
+# Activate it (you'll need to do this each time you open a new terminal)
+source venv/bin/activate
+```
+
+> **macOS users:** Modern Python installations via Homebrew require a virtual environment to install packages. If you skip this step, `pip3 install` will fail with an "externally-managed-environment" error.
+
+### 2. Install dependencies
+```bash
 pip3 install -r requirements.txt
 ```
 
-### 2. Create your `.env` file
+> Make sure your virtual environment is activated (you should see `(venv)` in your terminal prompt). If not, run `source venv/bin/activate` first.
+
+### 3. Create your `.env` file
 ```bash
 cp .env.example .env
 ```
 Open `.env` and fill in your **App Key** and **App Secret** from the [Schwab developer portal](https://developer.schwab.com).
 
-### 3. Run the one-time OAuth login
+### 4. Run the one-time OAuth login
 ```bash
 python3 auth.py
 ```
@@ -26,7 +38,7 @@ A browser window opens → log in to Schwab → approve the app. The token is sa
 
 > **Never commit `token.json` or `.env`** — both are already in `.gitignore`.
 
-### 4. Start the dashboard
+### 5. Start the dashboard
 ```bash
 python3 app.py
 ```
@@ -37,10 +49,13 @@ Open **http://127.0.0.1:5050** in your browser.
 ## Daily use
 
 ```bash
-python3 app.py        # start the dashboard (auto-reloads on file changes)
+source venv/bin/activate   # activate the virtual environment first
+python3 app.py             # start the dashboard (auto-reloads on file changes)
 ```
 
 The server runs at `http://127.0.0.1:5050` and stays open in your terminal. Press `Ctrl+C` to stop it.
+
+> **Remember:** Always activate the virtual environment (`source venv/bin/activate`) before running any Python scripts. You'll see `(venv)` in your terminal prompt when it's active.
 
 ---
 
@@ -83,6 +98,9 @@ All orders go through a **Preview → Confirm** step before being submitted to S
 Pulls new transactions from the Schwab API and inserts them into `trades.db`, with exact and fuzzy deduplication to avoid double-counting across sources.
 
 ```bash
+# Activate venv first
+source venv/bin/activate
+
 # Manual sync (respects market hours window by default)
 python3 sync_trades.py
 
@@ -99,10 +117,10 @@ python3 sync_trades.py --dry-run
 **Recommended cron setup** (edit with `crontab -e`):
 ```cron
 # Every 10 minutes on weekdays during market hours (9 AM–5 PM ET)
-*/10 9-16 * * 1-5  cd /path/to/schwab_app && python3.11 sync_trades.py
+*/10 9-16 * * 1-5  cd /path/to/ss7trading && source venv/bin/activate && python3 sync_trades.py
 
 # Once daily on weekends (catches assignments and exercises)
-0 9 * * 0,6        cd /path/to/schwab_app && python3.11 sync_trades.py --force
+0 9 * * 0,6        cd /path/to/ss7trading && source venv/bin/activate && python3 sync_trades.py --force
 ```
 
 Sync output is logged to `sync.log` and stdout.
@@ -139,3 +157,21 @@ Sync output is logged to `sync.log` and stdout.
 | `token.json` | OAuth token, auto-created and auto-refreshed (**never commit**) |
 | `sync.log` | Rolling log of all sync runs |
 | `../trades.db` | SQLite database — transactions and realized G/L |
+
+---
+
+## Virtual environment tips
+
+```bash
+# Activate the virtual environment (do this every time you open a new terminal)
+source venv/bin/activate
+
+# Check if you're in the virtual environment (you'll see "(venv)" in your prompt)
+which python3
+
+# Deactivate when you're done working
+deactivate
+
+# Install new packages (only when venv is activated)
+pip3 install package-name
+```
