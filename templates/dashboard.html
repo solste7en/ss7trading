@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ss7trading · Dashboard</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>📈 ss7trading</h1>
+    <div class="sub" id="lastUpdated">Loading…</div>
+  </div>
+  <button class="refresh-btn" onclick="refreshCurrent()">↻ Refresh</button>
+</div>
+
+<div class="tabs">
+  <div class="tab active"  onclick="switchTab('overview')">Overview</div>
+  <div class="tab"         onclick="switchTab('positions')">Positions</div>
+  <div class="tab"         onclick="switchTab('quotes')">Quote Lookup</div>
+  <div class="tab"         onclick="switchTab('history')">Trade History</div>
+  <div class="tab"         onclick="switchTab('gains')">Realized G/L</div>
+  <div class="tab"         onclick="switchTab('trade')">⚡ Trade</div>
+  <div class="tab"         onclick="switchTab('ladder')">🪜 Ladder</div>
+  <div class="tab"         onclick="switchTab('orders')">Open Orders</div>
+</div>
+
+<!-- ── Overview (Top Tickers) ── -->
+<div class="panel active" id="tab-overview">
+  <div id="overview-content">
+    <div class="loading">Loading top tickers…</div>
+  </div>
+</div>
+
+<!-- ── Positions ── -->
+<div class="panel" id="tab-positions">
+  <div class="loading" id="pos-loading">Loading positions…</div>
+  <div id="pos-error" class="error" style="display:none"></div>
+  <div class="table-wrap" id="pos-table" style="display:none">
+    <table><thead><tr>
+      <th>Symbol</th><th>Type</th><th>Qty</th><th>Avg Price</th>
+      <th>Mkt Value</th><th>Unrealized P&L</th><th>Day P&L</th><th>Day %</th>
+    </tr></thead><tbody id="pos-tbody"></tbody></table>
+  </div>
+</div>
+
+<!-- ── Quote Lookup ── -->
+<div class="panel" id="tab-quotes">
+  <div class="quote-search">
+    <input type="text" id="quoteInput" placeholder="NVDA" maxlength="10"
+           onkeydown="if(event.key==='Enter') fetchQuote()">
+    <button onclick="fetchQuote()">Get Quote</button>
+  </div>
+  <div id="quote-result"></div>
+  <hr style="border-color:#1e2235; margin:20px 0">
+  <div style="color:#64748b;font-size:12px;margin-bottom:12px;">Live quotes for all held positions:</div>
+  <div class="loading" id="q-loading">Loading quotes…</div>
+  <div id="q-error" class="error" style="display:none"></div>
+  <div class="table-wrap">
+    <table style="display:none" id="q-table"><thead><tr>
+      <th>Symbol</th><th>Last</th><th>Bid</th><th>Ask</th>
+      <th>Change</th><th>Change %</th><th>Volume</th><th>52W High</th><th>52W Low</th>
+    </tr></thead><tbody id="q-tbody"></tbody></table>
+  </div>
+</div>
+
+<!-- ── Trade History ── -->
+<div class="panel" id="tab-history">
+  <div class="filters">
+    <input type="text" id="h-ticker"   placeholder="Ticker (e.g. NVDA)" oninput="debounce(loadHistory)">
+    <input type="text" id="h-search"   placeholder="Search symbol/action…" oninput="debounce(loadHistory)">
+    <select id="h-category" onchange="loadHistory()">
+      <option value="">All categories</option>
+      <option value="option">Options</option>
+      <option value="equity">Equity</option>
+      <option value="income">Income</option>
+      <option value="transfer">Transfer</option>
+    </select>
+    <select id="h-limit" onchange="loadHistory()">
+      <option value="25">25 / page</option>
+      <option value="50">50 / page</option>
+      <option value="100">100 / page</option>
+    </select>
+    <span class="count" id="h-count"></span>
+  </div>
+  <div class="loading" id="h-loading">Loading…</div>
+  <div id="h-error" class="error" style="display:none"></div>
+  <div class="table-wrap" id="h-table" style="display:none">
+    <table><thead><tr>
+      <th>Date</th><th>Action</th><th>Category</th><th>Ticker</th>
+      <th>Symbol</th><th>Opt Type</th><th>Strike</th><th>Expiry</th>
+      <th>Qty</th><th>Price</th><th>Fees</th><th>Amount</th><th>Source</th>
+    </tr></thead><tbody id="h-tbody"></tbody></table>
+  </div>
+  <div class="pagination" id="h-pagination"></div>
+</div>
+
+<!-- ── Realized G/L ── -->
+<div class="panel" id="tab-gains">
+  <div class="filters">
+    <input type="text" id="g-ticker" placeholder="Ticker (e.g. NVDA)" oninput="debounce(loadGains)">
+    <select id="g-term" onchange="loadGains()">
+      <option value="">All (LT + ST)</option>
+      <option value="lt">Long Term only</option>
+      <option value="st">Short Term only</option>
+    </select>
+    <select id="g-limit" onchange="loadGains()">
+      <option value="25">25 / page</option>
+      <option value="50">50 / page</option>
+      <option value="100">100 / page</option>
+    </select>
+    <span class="count" id="g-count"></span>
+  </div>
+  <div class="loading" id="g-loading">Loading…</div>
+  <div id="g-error" class="error" style="display:none"></div>
+  <div class="table-wrap" id="g-table" style="display:none">
+    <table><thead><tr>
+      <th>Closed</th><th>Symbol</th><th>Ticker</th><th>Type</th>
+      <th>Qty</th><th>Proceeds</th><th>Cost Basis</th>
+      <th>Total G/L</th><th>Total G/L %</th>
+      <th>LT G/L</th><th>ST G/L</th>
+      <th>Wash Sale</th><th>Disallowed</th>
+    </tr></thead><tbody id="g-tbody"></tbody></table>
+  </div>
+  <div class="pagination" id="g-pagination"></div>
+</div>
+
+<!-- ── Trade ── -->
+<div class="panel" id="tab-trade">
+  <div class="trade-toggle">
+    <button class="toggle-btn active" id="btn-equity" onclick="setTradeMode('equity')">📈 Stock / ETF</button>
+    <button class="toggle-btn"        id="btn-option" onclick="setTradeMode('option')">🎯 Option (Single Leg)</button>
+  </div>
+
+  <!-- Equity / ETF form -->
+  <div id="form-equity" class="trade-form">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Ticker</label>
+        <input type="text" id="eq-ticker" placeholder="NVDA" maxlength="10">
+      </div>
+      <div class="form-group">
+        <label>Action</label>
+        <select id="eq-action">
+          <option value="buy">Buy</option>
+          <option value="sell">Sell</option>
+          <option value="sell_short">Sell Short</option>
+          <option value="buy_to_cover">Buy to Cover</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Quantity (shares)</label>
+        <input type="number" id="eq-qty" placeholder="100" min="1" step="1">
+      </div>
+      <div class="form-group">
+        <label>Order Type</label>
+        <select id="eq-order-type" onchange="updateEqFields()">
+          <option value="limit" selected>Limit</option>
+          <option value="market">Market</option>
+          <option value="stop">Stop</option>
+          <option value="stop_limit">Stop Limit</option>
+        </select>
+      </div>
+      <div class="form-group" id="eq-price-group">
+        <label>Limit Price ($)</label>
+        <input type="number" id="eq-price" placeholder="0.00" step="0.01" min="0">
+      </div>
+      <div class="form-group" id="eq-stop-group" style="display:none">
+        <label>Stop Price ($)</label>
+        <input type="number" id="eq-stop" placeholder="0.00" step="0.01" min="0">
+      </div>
+      <div class="form-group">
+        <label>Duration</label>
+        <select id="eq-duration">
+          <option value="day">Day</option>
+          <option value="gtc">GTC (Good Till Cancelled)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Session</label>
+        <select id="eq-session">
+          <option value="normal">Normal (Market Hours)</option>
+          <option value="seamless">Extended Hours (Pre + Post)</option>
+          <option value="am">Pre-Market Only</option>
+          <option value="pm">Post-Market Only</option>
+        </select>
+      </div>
+    </div>
+    <button class="preview-btn" onclick="previewOrder('equity')">Preview Order →</button>
+  </div>
+
+  <!-- Option form -->
+  <div id="form-option" class="trade-form" style="display:none">
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Underlying Ticker</label>
+        <input type="text" id="opt-underlying" placeholder="NVDA" maxlength="10">
+      </div>
+      <div class="form-group">
+        <label>Option Type</label>
+        <select id="opt-type">
+          <option value="PUT">PUT</option>
+          <option value="CALL">CALL</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Action</label>
+        <select id="opt-action">
+          <option value="sell_to_open">Sell to Open (short)</option>
+          <option value="buy_to_open">Buy to Open (long)</option>
+          <option value="buy_to_close">Buy to Close</option>
+          <option value="sell_to_close">Sell to Close</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Expiration Date</label>
+        <input type="date" id="opt-expiry">
+      </div>
+      <div class="form-group">
+        <label>Strike Price ($)</label>
+        <input type="number" id="opt-strike" placeholder="170.00" step="0.50" min="0">
+      </div>
+      <div class="form-group">
+        <label>Contracts</label>
+        <input type="number" id="opt-contracts" placeholder="1" min="1" step="1" value="1">
+      </div>
+      <div class="form-group">
+        <label>Order Type</label>
+        <select id="opt-order-type" onchange="updateOptFields()">
+          <option value="limit" selected>Limit</option>
+          <option value="market">Market</option>
+        </select>
+      </div>
+      <div class="form-group" id="opt-price-group">
+        <label>Limit Price (per share)</label>
+        <input type="number" id="opt-price" placeholder="0.00" step="0.01" min="0">
+      </div>
+      <div class="form-group">
+        <label>Duration</label>
+        <select id="opt-duration">
+          <option value="day">Day</option>
+          <option value="gtc">GTC (Good Till Cancelled)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Session</label>
+        <select id="opt-session">
+          <option value="normal">Normal (Market Hours)</option>
+          <option value="seamless">Extended Hours (Pre + Post)</option>
+          <option value="am">Pre-Market Only</option>
+          <option value="pm">Post-Market Only</option>
+        </select>
+      </div>
+    </div>
+    <button class="preview-btn" onclick="previewOrder('option')">Preview Order →</button>
+  </div>
+
+  <div id="trade-result"></div>
+</div>
+
+<!-- ── Ladder Trade ── -->
+<div class="panel" id="tab-ladder">
+  <div class="ladder-layout">
+    <div class="ladder-form">
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="form-group">
+          <label>Ticker</label>
+          <input type="text" id="lad-ticker" placeholder="NVDA" maxlength="10"
+                 onchange="loadLadderRecent()" onkeydown="if(event.key==='Enter') loadLadderRecent()">
+        </div>
+        <div class="form-group">
+          <label>Action</label>
+          <select id="lad-action">
+            <option value="sell">Sell</option>
+            <option value="buy">Buy</option>
+            <option value="sell_short">Sell Short</option>
+            <option value="buy_to_cover">Buy to Cover</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Duration</label>
+          <select id="lad-duration">
+            <option value="gtc">GTC (Good Till Cancelled)</option>
+            <option value="day">Day</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Session</label>
+          <select id="lad-session">
+            <option value="normal">Normal (Market Hours)</option>
+            <option value="seamless">Extended Hours (Pre + Post)</option>
+            <option value="am">Pre-Market Only</option>
+            <option value="pm">Post-Market Only</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Quick Fill</div>
+      <div class="ladder-helpers">
+        <div class="form-group">
+          <label>Total Qty</label>
+          <input type="number" id="lad-split-qty" placeholder="1000" min="1">
+        </div>
+        <div class="form-group">
+          <label>Start Price</label>
+          <input type="number" id="lad-split-start" placeholder="100.00" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label>End Price</label>
+          <input type="number" id="lad-split-end" placeholder="150.00" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label># Rungs</label>
+          <input type="number" id="lad-split-rungs" placeholder="4" min="1" max="20" value="4">
+        </div>
+        <button class="btn-sm" onclick="ladderEvenSplit()">Even Split</button>
+        <button class="btn-sm-outline" onclick="ladderScaleUp()">Scale Up ↑</button>
+        <button class="btn-sm-outline" onclick="ladderScaleDown()">Scale Down ↓</button>
+      </div>
+
+      <table class="rungs-table">
+        <thead><tr><th>#</th><th>Quantity</th><th>Price ($)</th><th></th></tr></thead>
+        <tbody id="lad-rungs-tbody"></tbody>
+      </table>
+      <button class="btn-sm-outline" onclick="addRung()" style="margin-bottom:14px">+ Add Rung</button>
+
+      <div class="ladder-summary">
+        <div><div class="lbl">Rungs</div><div class="val" id="lad-rung-count">0</div></div>
+        <div><div class="lbl">Total Shares</div><div class="val" id="lad-total-qty">0</div></div>
+        <div><div class="lbl">Est. Total Value</div><div class="val" id="lad-total-value">$0.00</div></div>
+      </div>
+
+      <button class="preview-btn" onclick="previewLadder()">Preview Ladder →</button>
+      <div id="lad-result"></div>
+    </div>
+
+    <div class="ladder-sidebar">
+      <h3>Recent Trades</h3>
+      <div id="lad-recent">
+        <div style="color:#475569">Enter a ticker to see recent trades</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Open Orders ── -->
+<div class="panel" id="tab-orders">
+  <div class="filters">
+    <input type="text" id="ord-ticker" placeholder="Filter by ticker…" oninput="filterOrders()" style="width:160px">
+    <select id="ord-type" onchange="filterOrders()">
+      <option value="">All order types</option>
+      <option value="MARKET">Market</option>
+      <option value="LIMIT">Limit</option>
+      <option value="STOP">Stop</option>
+      <option value="STOP_LIMIT">Stop Limit</option>
+    </select>
+    <select id="ord-status" onchange="filterOrders()">
+      <option value="">All statuses</option>
+      <option value="WORKING">Working</option>
+      <option value="QUEUED">Queued</option>
+      <option value="PENDING_ACTIVATION">Pending Activation</option>
+      <option value="ACCEPTED">Accepted</option>
+    </select>
+    <button class="refresh-btn" style="margin-left:0" onclick="loadOrders()">↻ Refresh</button>
+    <span class="count" id="ord-count"></span>
+  </div>
+  <div class="loading" id="ord-loading" style="display:none">Loading open orders…</div>
+  <div id="ord-error" class="error" style="display:none"></div>
+  <div class="table-wrap" id="ord-table" style="display:none">
+    <table>
+      <thead><tr>
+        <th onclick="sortOrders('order_id')">Order ID ↕</th>
+        <th onclick="sortOrders('status')">Status ↕</th>
+        <th onclick="sortOrders('order_type')">Type ↕</th>
+        <th onclick="sortOrders('underlying')">Ticker ↕</th>
+        <th>Symbol</th>
+        <th onclick="sortOrders('instruction')">Side ↕</th>
+        <th onclick="sortOrders('quantity')">Qty ↕</th>
+        <th onclick="sortOrders('filled_quantity')">Filled ↕</th>
+        <th onclick="sortOrders('price')">Price ↕</th>
+        <th onclick="sortOrders('entered_time')">Entered ↕</th>
+        <th>Action</th>
+      </tr></thead>
+      <tbody id="ord-tbody"></tbody>
+    </table>
+  </div>
+  <div id="ord-empty" style="display:none;color:#64748b;padding:32px;text-align:center">No open orders found.</div>
+</div>
+
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
