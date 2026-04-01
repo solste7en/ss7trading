@@ -268,8 +268,8 @@
         <div class="form-group">
           <label>Ticker</label>
           <input type="text" id="lad-ticker" placeholder="NVDA" maxlength="10"
-                 onchange="ladderRecentState.page=1; loadLadderRecent()"
-                 onkeydown="if(event.key==='Enter'){ ladderRecentState.page=1; loadLadderRecent(); }">
+                 onchange="onLadderTickerChange()"
+                 onkeydown="if(event.key==='Enter') onLadderTickerChange()">
         </div>
         <div class="form-group">
           <label>Action</label>
@@ -296,6 +296,41 @@
             <option value="pm">Post-Market Only</option>
           </select>
         </div>
+      </div>
+
+      <!-- Strategy: Position Unwind -->
+      <div class="ladder-strategy" id="lad-strategy">
+        <div class="ladder-strategy-header">
+          <span class="ladder-strategy-title">Position Unwind</span>
+          <span class="ladder-strategy-status" id="lad-strat-status"></span>
+        </div>
+        <div id="lad-strat-banner"></div>
+        <button class="btn-sm-outline" id="lad-verify-btn" style="display:none;font-size:10px;padding:4px 8px"
+                onclick="loadLiveVerify()">Verify vs API</button>
+        <div class="ladder-strategy-params" id="lad-strat-params" style="display:none">
+          <div class="lsp-group">
+            <label>Window</label>
+            <input type="number" id="lad-p-window" value="5" min="2" max="20" step="1">
+          </div>
+          <div class="lsp-group">
+            <label>Sell %</label>
+            <input type="number" id="lad-p-sellpct" value="25" min="1" max="100" step="1">
+          </div>
+          <div class="lsp-group">
+            <label>Snap ¢</label>
+            <input type="number" id="lad-p-premium" value="77" min="1" max="99" step="1">
+          </div>
+          <div class="lsp-group">
+            <label>Min Streak</label>
+            <input type="number" id="lad-p-minstreak" value="10" min="1" max="100" step="1">
+          </div>
+          <div class="lsp-group">
+            <label>Max Rungs</label>
+            <input type="number" id="lad-p-maxrungs" value="5" min="1" max="20" step="1">
+          </div>
+          <button class="btn-sm" onclick="loadLadderSuggest()">Recalculate</button>
+        </div>
+        <div id="lad-verify-result" style="display:none"></div>
       </div>
 
       <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Quick Fill</div>
@@ -338,9 +373,42 @@
     </div>
 
     <div class="ladder-sidebar">
-      <h3>Recent Trades</h3>
-      <div id="lad-recent">
-        <div style="color:#475569">Enter a ticker to see recent trades</div>
+      <div class="ladder-sidebar-header">
+        <h3>Recent Trades</h3>
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;cursor:pointer">
+          <input type="checkbox" id="lad-include-options" checked
+                 onchange="ladderRecentState.page=1; loadLadderRecent()"
+                 style="accent-color:#6366f1">
+          Include options
+        </label>
+      </div>
+      <div class="ladder-sidebar-count" id="lad-recent-count"></div>
+      <div class="ladder-sidebar-table-wrap">
+        <div id="lad-recent">
+          <div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>
+        </div>
+      </div>
+
+      <div class="ladder-sidebar-divider"></div>
+
+      <div class="ladder-sidebar-header">
+        <h3>Open Orders</h3>
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;cursor:pointer">
+            <input type="checkbox" id="lad-orders-include-options" checked
+                   onchange="loadLadderOrders()"
+                   style="accent-color:#6366f1">
+            Include options
+          </label>
+          <button class="cancel-all-btn" id="lad-cancel-all-btn" style="display:none"
+                  onclick="cancelAllLadderOrders()">Cancel All</button>
+        </div>
+      </div>
+      <div class="ladder-sidebar-count" id="lad-orders-count"></div>
+      <div class="ladder-sidebar-table-wrap">
+        <div id="lad-orders">
+          <div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>
+        </div>
       </div>
     </div>
   </div>

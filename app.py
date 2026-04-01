@@ -4,12 +4,46 @@ Run: python app.py
 Visit: http://127.0.0.1:5050
 """
 import datetime
+import threading
+import time
 import traceback
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 import schwab
 from auth import get_client
-from db import get_transactions, get_realized_gains, get_top_tickers
+from db import get_transactions, get_realized_gains, get_top_tickers, suggest_position_unwind
+from sync_trades import parse_schwab_transaction
+
+# ── Schwab order API rate-limiter ──────────────────────────────────────────────
+# Schwab enforces a burst limit on order writes (place + cancel).
+# A 600 ms gap between successive calls stays well within the allowed rate
+# and adds only ~0.6 s per rung — imperceptible for typical ladder sizes.
+# All order-placement and cancel calls route through _throttled_order_call()
+# so any future batch strategy automatically inherits this behaviour.
+#
+# Tune ORDER_INTERVAL_S here if Schwab tightens or relaxes the limit.
+_ORDER_INTERVAL_S: float = 0.6        # min seconds between successive order API calls
+_order_lock                = threading.Lock()
+_last_order_ts: float      = 0.0      # epoch-seconds of the most recent call
+
+
+def _throttled_order_call(fn, *args, **kwargs):
+    """
+    Generic throttle wrapper for any Schwab order-mutating API call.
+    Acquires the shared lock, sleeps only as long as needed to honour
+    _ORDER_INTERVAL_S since the previous call, then fires fn(*args, **kwargs).
+
+    Usage:
+        resp = _throttled_order_call(client.place_order, account_hash, order)
+        resp = _throttled_order_call(client.cancel_order, order_id, account_hash)
+    """
+    global _last_order_ts
+    with _order_lock:
+        wait_for = _ORDER_INTERVAL_S - (time.monotonic() - _last_order_ts)
+        if wait_for > 0:
+            time.sleep(wait_for)
+        _last_order_ts = time.monotonic()
+    return fn(*args, **kwargs)
 
 BASE_DIR = Path(__file__).parent
 
@@ -179,6 +213,89 @@ def api_top_tickers():
     """Return the 10 most-traded tickers with their last 5 executed trades."""
     try:
         return jsonify(get_top_tickers(top_n=10, recent_n=10))
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── Live transaction cross-reference endpoint ─────────────────────────────────
+
+@app.route("/api/transactions/live")
+def api_transactions_live():
+    """Fetch recent transactions for a ticker directly from Schwab API and
+    compare against the local DB. Returns both API and DB rows so the UI
+    can highlight any gaps or mismatches."""
+    try:
+        ticker = request.args.get("ticker", "").strip().upper()
+        days   = max(7, min(365, int(request.args.get("days", 180))))
+        if not ticker:
+            return jsonify({"error": "ticker is required"}), 400
+
+        client    = get_client()
+        resp      = client.get_account_numbers()
+        resp.raise_for_status()
+        acct_hash = resp.json()[0]["hashValue"]
+
+        end_dt   = datetime.datetime.now(datetime.timezone.utc)
+        start_dt = end_dt - datetime.timedelta(days=days)
+
+        resp = client.get_transactions(
+            account_hash=acct_hash,
+            start_date=start_dt,
+            end_date=end_dt,
+        )
+        resp.raise_for_status()
+        raw_txs = resp.json() or []
+
+        # Parse and filter for this ticker
+        api_rows = []
+        for raw in raw_txs:
+            try:
+                parsed = parse_schwab_transaction(raw)
+                if parsed and parsed.get("underlying") == ticker:
+                    api_rows.append(parsed)
+            except Exception:
+                pass
+
+        api_rows.sort(key=lambda r: r.get("trade_date", ""), reverse=True)
+
+        # Pull matching DB rows for the same date window
+        from db import get_transactions as _get_tx
+        db_result = _get_tx(
+            page=1, limit=500,
+            ticker=ticker,
+            category="",
+        )
+        db_rows = [r for r in db_result["data"]
+                   if r.get("trade_date", "") >= start_dt.strftime("%Y-%m-%d")]
+
+        return jsonify({
+            "ticker": ticker,
+            "days": days,
+            "api_count": len(api_rows),
+            "db_count": len(db_rows),
+            "api_rows": api_rows,
+            "db_rows": db_rows,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── Ladder suggestion endpoint ─────────────────────────────────────────────────
+
+@app.route("/api/ladder-suggest")
+def api_ladder_suggest():
+    """Analyse recent equity trades and suggest position-unwind ladder rungs."""
+    try:
+        ticker = request.args.get("ticker", "").strip().upper()
+        if not ticker:
+            return jsonify({"error": "ticker is required"}), 400
+        window_size   = max(2, min(20, int(request.args.get("window_size", 5))))
+        sell_pct      = max(1, min(100, int(request.args.get("sell_pct", 25)))) / 100.0
+        premium_cents = max(1, min(99, int(request.args.get("premium_cents", 77))))
+        min_streak    = max(1, min(100, int(request.args.get("min_streak", 10))))
+        max_rungs     = max(1, min(20, int(request.args.get("max_rungs", 5))))
+        return jsonify(suggest_position_unwind(
+            ticker, window_size, sell_pct, premium_cents, min_streak, max_rungs))
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
@@ -384,7 +501,8 @@ def api_place_order():
             return jsonify({"error": f"Unknown trade_type: {trade_type!r}"}), 400
 
         account_hash = _get_account_hash()
-        resp = get_client().place_order(account_hash, order)
+        client = get_client()
+        resp = _throttled_order_call(client.place_order, account_hash, order)
         resp.raise_for_status()
 
         location = resp.headers.get("Location", "")
@@ -423,7 +541,7 @@ def api_place_ladder():
                                     "status": "error", "error": f"Unknown trade_type: {trade_type!r}"})
                     continue
 
-                resp = client.place_order(account_hash, order)
+                resp = _throttled_order_call(client.place_order, account_hash, order)
                 resp.raise_for_status()
 
                 location = resp.headers.get("Location", "")
@@ -446,7 +564,8 @@ def api_cancel_order(order_id):
     """Cancel a specific open order by ID."""
     try:
         account_hash = _get_account_hash()
-        resp = get_client().cancel_order(order_id, account_hash)
+        client = get_client()
+        resp = _throttled_order_call(client.cancel_order, order_id, account_hash)
         resp.raise_for_status()
         return jsonify({"status": "cancelled", "order_id": order_id})
     except Exception as e:

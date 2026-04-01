@@ -144,8 +144,7 @@ async function loadTickerPage(symbol, page) {
 function openLadder(symbol) {
   switchTab('ladder');
   document.getElementById('lad-ticker').value = symbol;
-  ladderRecentState.page = 1;
-  loadLadderRecent();
+  onLadderTickerChange();
 }
 
 // ── Overview custom ticker lookup ─────────────────────────────────
@@ -656,7 +655,285 @@ function ladderScaleDown() {
   renderRungs();
 }
 
-const ladderRecentState = { page: 1, pages: 1, total: 0 };
+// ── Position Unwind Strategy ──────────────────────────────────────
+let _lastSuggestTicker = '';
+
+function onLadderTickerChange() {
+  ladderRecentState.page = 1;
+  loadLadderRecent();
+  loadLadderSuggest();
+  loadLadderOrders();
+}
+
+async function loadLadderSuggest() {
+  const ticker = document.getElementById('lad-ticker').value.trim().toUpperCase();
+  const banner = document.getElementById('lad-strat-banner');
+  const status = document.getElementById('lad-strat-status');
+  const params = document.getElementById('lad-strat-params');
+
+  if (!ticker) {
+    banner.innerHTML = '<div class="ladder-strategy-banner strat-dim">Enter a ticker to analyse trade history</div>';
+    status.textContent = '';
+    params.style.display = 'none';
+    return;
+  }
+
+  _lastSuggestTicker = ticker;
+  status.textContent = 'analysing…';
+  banner.innerHTML = '';
+
+  // Reset verify panel when ticker changes
+  _verifyOpen = false;
+  const verifyBtn = document.getElementById('lad-verify-btn');
+  const verifyDiv = document.getElementById('lad-verify-result');
+  if (verifyBtn) { verifyBtn.textContent = 'Verify vs API'; verifyBtn.style.display = 'none'; }
+  if (verifyDiv) { verifyDiv.style.display = 'none'; verifyDiv.innerHTML = ''; }
+
+  const ws   = document.getElementById('lad-p-window').value || 5;
+  const sp   = document.getElementById('lad-p-sellpct').value || 25;
+  const pc   = document.getElementById('lad-p-premium').value || 77;
+  const ms   = document.getElementById('lad-p-minstreak').value || 10;
+  const mr   = document.getElementById('lad-p-maxrungs').value || 5;
+
+  try {
+    const q = new URLSearchParams({
+      ticker, window_size: ws, sell_pct: sp,
+      premium_cents: pc, min_streak: ms, max_rungs: mr,
+    });
+
+    // Fetch suggestion + live quote in parallel
+    const [data, quoteRes] = await Promise.all([
+      fetch('/api/ladder-suggest?' + q).then(r => r.json()),
+      fetch('/api/quote/' + ticker).then(r => r.json()).catch(() => null),
+    ]);
+    if (data.error) throw new Error(data.error);
+
+    if (document.getElementById('lad-ticker').value.trim().toUpperCase() !== _lastSuggestTicker) return;
+
+    // Resolve reference price: live quote > last DB trade
+    const livePrice = quoteRes && quoteRes.last != null ? quoteRes.last : null;
+    const refPrice = livePrice ?? data.last_trade_price ?? null;
+    const priceSource = livePrice != null ? 'Market' : (refPrice != null ? 'Last trade' : null);
+
+    if (verifyBtn) verifyBtn.style.display = '';
+
+    if (data.note || !data.rungs || data.rungs.length === 0) {
+      status.textContent = '';
+      params.style.display = 'none';
+      const priceLine = refPrice != null
+        ? `<div style="margin-bottom:4px;font-size:12px">${priceSource} price: <span class="strat-highlight" style="font-size:14px;font-weight:700">$${fmt(refPrice)}</span></div>`
+        : '';
+      const streakLabel = data.streak_count
+        ? `${data.streak_count} consecutive <span class="strat-highlight">${esc(data.direction || '?')}</span> trades`
+        : 'No accumulation streak';
+      banner.innerHTML = priceLine + `<div class="ladder-strategy-banner strat-dim">${streakLabel}`
+        + (data.note ? ` — ${esc(data.note)}` : '') + '</div>';
+      return;
+    }
+
+    // --- price check: how many rungs would fill immediately? ---------------
+    const isLong = data.direction === 'Buy';
+    let immediateCount = 0;
+    if (refPrice != null) {
+      for (const r of data.rungs) {
+        // Sell limit below market → fills immediately; Buy limit above market → fills immediately
+        if (isLong && refPrice >= r.price) immediateCount++;
+        else if (!isLong && refPrice <= r.price) immediateCount++;
+      }
+    }
+
+    const dir = isLong ? 'buys' : 'sells short';
+    const actionLabel = data.unwind_action === 'sell' ? 'Sell' : 'Buy to Cover';
+    status.textContent = '';
+    params.style.display = 'flex';
+
+    // --- build the price header line ---------------------------------------
+    let priceHeader = '';
+    if (refPrice != null) {
+      priceHeader = `<div style="margin-bottom:6px;font-size:12px">` +
+        `${priceSource} price: <span class="strat-highlight" style="font-size:14px;font-weight:700">$${fmt(refPrice)}</span>` +
+        `</div>`;
+    }
+
+    // --- build warning if applicable --------------------------------------
+    let warningHtml = '';
+    if (immediateCount > 0 && immediateCount === data.rungs.length) {
+      warningHtml =
+        `<div class="strat-warning">` +
+          `⚠️ ${priceSource} price ($${fmt(refPrice)}) is already more favorable than <b>all ${data.rungs.length}</b> suggested prices — ` +
+          `every order would fill immediately at market. ` +
+          `Use <b>Quick Fill</b> below to structure a ladder around current price levels instead.` +
+        `</div>`;
+    } else if (immediateCount > 0) {
+      warningHtml =
+        `<div class="strat-warning">` +
+          `⚠️ ${priceSource} price ($${fmt(refPrice)}) is already more favorable than <b>${immediateCount} of ${data.rungs.length}</b> suggested prices — ` +
+          `those orders would fill immediately. Consider adjusting or using Quick Fill for those shares.` +
+        `</div>`;
+    }
+
+    // --- rung table (flag immediate rows) ---------------------------------
+    const rungSummary = data.rungs.map((r, i) => {
+      const isImmediate = refPrice != null && (
+        (isLong && refPrice >= r.price) || (!isLong && refPrice <= r.price));
+      const rowStyle = isImmediate ? ' style="opacity:0.45"' : '';
+      const flag = isImmediate ? ' <span style="color:#fbbf24;font-size:9px">INSTANT</span>' : '';
+      return `<tr${rowStyle}><td style="color:#475569">${i + 1}</td>` +
+        `<td>${fmt(r.qty, 0)}</td>` +
+        `<td>$${fmt(r.price)}${flag}</td>` +
+        `<td style="color:#64748b">avg $${fmt(r.window_avg, 2)} · ${fmt(r.window_shares, 0)} shares</td></tr>`;
+    }).join('');
+
+    const totalRungQty = data.rungs.reduce((s, r) => s + r.qty, 0);
+    const totalRungVal = data.rungs.reduce((s, r) => s + r.qty * r.price, 0);
+
+    const shouldAutoApply = immediateCount === 0;
+
+    banner.innerHTML =
+      priceHeader +
+      `<div class="ladder-strategy-banner">` +
+        `<span class="strat-highlight">${data.streak_count}</span> consecutive ${esc(dir)} detected — ` +
+        `<span class="strat-highlight">${fmt(data.total_shares, 0)}</span> shares, ` +
+        `avg <span class="strat-highlight">$${fmt(data.overall_avg, 2)}</span>` +
+      `</div>` +
+      warningHtml +
+      `<table style="width:100%;margin:6px 0"><thead><tr>` +
+        `<th style="font-size:10px;padding:3px 6px">#</th>` +
+        `<th style="font-size:10px;padding:3px 6px">Qty</th>` +
+        `<th style="font-size:10px;padding:3px 6px">Price</th>` +
+        `<th style="font-size:10px;padding:3px 6px">Window</th>` +
+      `</tr></thead><tbody>${rungSummary}</tbody></table>` +
+      `<div style="display:flex;align-items:center;gap:10px;margin-top:6px">` +
+        `<span style="font-size:11px;color:#64748b">` +
+          `${actionLabel} ${fmt(totalRungQty, 0)} shares · $${fmt(totalRungVal)} est. value` +
+        `</span>` +
+        `<button class="strat-apply-btn" onclick="applyLadderSuggest()">Apply to Rungs</button>` +
+      `</div>`;
+
+    window._ladderSuggestion = data;
+
+    // Only auto-apply when no rungs would fill immediately
+    if (shouldAutoApply) applyLadderSuggest();
+
+  } catch (e) {
+    status.textContent = '';
+    banner.innerHTML = `<div class="ladder-strategy-banner strat-dim">Error: ${esc(e.message)}</div>`;
+    params.style.display = 'none';
+  }
+}
+
+// ── Live DB vs API cross-reference ───────────────────────────────
+let _verifyOpen = false;
+
+async function loadLiveVerify() {
+  const ticker = document.getElementById('lad-ticker').value.trim().toUpperCase();
+  const verifyDiv = document.getElementById('lad-verify-result');
+  if (!ticker) return;
+
+  // Toggle off if already open
+  if (_verifyOpen) {
+    verifyDiv.style.display = 'none';
+    _verifyOpen = false;
+    document.getElementById('lad-verify-btn').textContent = 'Verify vs API';
+    return;
+  }
+
+  _verifyOpen = true;
+  document.getElementById('lad-verify-btn').textContent = 'Hide verify';
+  verifyDiv.style.display = 'block';
+  verifyDiv.innerHTML = '<div class="loading" style="padding:8px 0;font-size:12px">Fetching live data from Schwab API…</div>';
+
+  try {
+    const res = await fetch('/api/transactions/live?ticker=' + encodeURIComponent(ticker) + '&days=180').then(r => r.json());
+    if (res.error) throw new Error(res.error);
+
+    const apiRows = res.api_rows || [];
+    const dbRows  = res.db_rows  || [];
+
+    // Build a lookup of DB rows by (date, action, qty, price) for matching
+    const dbKeys = new Set(dbRows.map(r =>
+      `${r.trade_date}|${r.action}|${r.quantity}|${r.price}`));
+    const apiKeys = new Set(apiRows.map(r =>
+      `${r.trade_date}|${r.action}|${r.quantity}|${r.price}`));
+
+    // Flag rows
+    const apiMissing = apiRows.filter(r =>
+      !dbKeys.has(`${r.trade_date}|${r.action}|${r.quantity}|${r.price}`));
+    const dbExtra = dbRows.filter(r =>
+      !apiKeys.has(`${r.trade_date}|${r.action}|${r.quantity}|${r.price}`));
+
+    const statusHtml = (apiMissing.length === 0 && dbExtra.length === 0)
+      ? `<div style="color:#34d399;font-size:11px;margin-bottom:6px">DB matches API — no discrepancies in the last ${res.days} days</div>`
+      : `<div style="color:#fbbf24;font-size:11px;margin-bottom:6px">`
+        + (apiMissing.length ? `${apiMissing.length} API trade(s) not in DB  ` : '')
+        + (dbExtra.length    ? `${dbExtra.length} DB trade(s) not in API`      : '')
+        + `</div>`;
+
+    const makeRow = (r, highlight) => {
+      const isBuy = (r.action || '').toLowerCase().includes('buy');
+      const bg = highlight ? 'background:#44270a' : '';
+      const optInfo = r.option_type
+        ? ` <span style="color:#94a3b8;font-size:10px">${r.option_type} $${r.option_strike} ${r.option_expiry || ''}</span>`
+        : '';
+      return `<tr style="${bg}">
+        <td style="color:#64748b">${r.trade_date}</td>
+        <td class="${isBuy ? 'pos' : 'neg'}">${esc(r.action)}</td>
+        <td>${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
+        <td>${r.price != null ? '$' + fmt(r.price, 4) : '—'}${optInfo}</td>
+      </tr>`;
+    };
+
+    const apiRowsHtml = apiRows.length
+      ? apiRows.map(r => {
+          const key = `${r.trade_date}|${r.action}|${r.quantity}|${r.price}`;
+          return makeRow(r, !dbKeys.has(key));
+        }).join('')
+      : '<tr><td colspan="4" style="color:#64748b">No trades returned by API</td></tr>';
+
+    verifyDiv.innerHTML =
+      `<div style="border-top:1px solid #2d3148;margin-top:10px;padding-top:10px">` +
+      `<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">` +
+        `Live API — ${esc(ticker)} · last ${res.days} days` +
+        ` <span style="color:#475569">(API: ${res.api_count} · DB: ${res.db_count})</span>` +
+      `</div>` +
+      statusHtml +
+      `<div style="overflow-x:auto">` +
+      `<table style="min-width:340px"><thead><tr>` +
+        `<th style="font-size:10px;padding:3px 6px">Date</th>` +
+        `<th style="font-size:10px;padding:3px 6px">Action</th>` +
+        `<th style="font-size:10px;padding:3px 6px">Qty</th>` +
+        `<th style="font-size:10px;padding:3px 6px">Price</th>` +
+      `</tr></thead><tbody>${apiRowsHtml}</tbody></table></div>` +
+      (apiMissing.length
+        ? `<div style="margin-top:6px;font-size:11px;color:#fbbf24">` +
+          `Rows highlighted amber are in the API but not in the DB — run sync_trades.py to import them.</div>`
+        : '') +
+      `</div>`;
+
+  } catch (e) {
+    verifyDiv.innerHTML = `<div class="error" style="font-size:12px;margin-top:8px">API error: ${esc(e.message)}</div>`;
+  }
+}
+
+function applyLadderSuggest() {
+  const data = window._ladderSuggestion;
+  if (!data || !data.rungs || !data.rungs.length) return;
+
+  // Set action dropdown
+  const actionSelect = document.getElementById('lad-action');
+  if (data.unwind_action && actionSelect) {
+    actionSelect.value = data.unwind_action;
+  }
+
+  // Fill rungs
+  ladderRungs = data.rungs.map(r => ({
+    qty: String(r.qty),
+    price: String(r.price),
+  }));
+  renderRungs();
+}
+
+const ladderRecentState = { page: 1, pages: 1, total: 0, eqCount: null, optCount: null };
 const LADDER_RECENT_LIMIT = 20;
 const LADDER_RECENT_ACTIONS = new Set([
   'Buy','Sell','Sell Short','Buy to Cover',
@@ -666,64 +943,223 @@ const LADDER_RECENT_ACTIONS = new Set([
 async function loadLadderRecent(page) {
   const ticker = document.getElementById('lad-ticker').value.trim().toUpperCase();
   const sidebar = document.getElementById('lad-recent');
+  const countDiv = document.getElementById('lad-recent-count');
+  const includeOpts = document.getElementById('lad-include-options').checked;
+
   if (!ticker) {
-    sidebar.innerHTML = '<div style="color:#475569">Enter a ticker to see recent trades</div>';
+    sidebar.innerHTML = '<div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>';
+    countDiv.textContent = '';
     return;
   }
-  if (page !== undefined) ladderRecentState.page = page;
+
+  // Reset counts when page is not specified (new ticker or toggle change)
+  const isNewQuery = page === undefined;
+  if (isNewQuery) {
+    ladderRecentState.page = 1;
+    ladderRecentState.eqCount = null;
+    ladderRecentState.optCount = null;
+  } else {
+    ladderRecentState.page = page;
+  }
+
   sidebar.innerHTML = '<div class="loading" style="padding:10px">Loading…</div>';
+
   try {
-    const params = new URLSearchParams({
-      ticker,
-      limit: LADDER_RECENT_LIMIT,
-      page: ladderRecentState.page,
-    });
-    const res = await fetch('/api/transactions?' + params).then(r => r.json());
+    const mainParams = { ticker, limit: LADDER_RECENT_LIMIT, page: ladderRecentState.page };
+    if (!includeOpts) mainParams.category = 'equity';
+
+    // Fetch trades + counts in parallel (counts only on first load of a ticker/toggle)
+    const fetchTrades = fetch('/api/transactions?' + new URLSearchParams(mainParams)).then(r => r.json());
+    const fetchCounts = (ladderRecentState.eqCount === null)
+      ? Promise.all([
+          fetch('/api/transactions?' + new URLSearchParams({ ticker, category: 'equity', limit: 10, page: 1 })).then(r => r.json()),
+          fetch('/api/transactions?' + new URLSearchParams({ ticker, category: 'option',  limit: 10, page: 1 })).then(r => r.json()),
+        ])
+      : Promise.resolve(null);
+
+    const [res, counts] = await Promise.all([fetchTrades, fetchCounts]);
     if (res.error) throw new Error(res.error);
+
+    if (counts) {
+      ladderRecentState.eqCount  = counts[0].total || 0;
+      ladderRecentState.optCount = counts[1].total || 0;
+    }
 
     ladderRecentState.pages = res.pages;
     ladderRecentState.total = res.total;
 
+    // Count header
+    const totalAll = ladderRecentState.eqCount + ladderRecentState.optCount;
+    countDiv.innerHTML = `${totalAll.toLocaleString()} trades `
+      + `<span style="color:#475569">(${ladderRecentState.eqCount.toLocaleString()} equity`
+      + ` / ${ladderRecentState.optCount.toLocaleString()} option)</span>`;
+
     const trades = res.data.filter(r => LADDER_RECENT_ACTIONS.has(r.action));
 
     if (!trades.length && ladderRecentState.page === 1) {
-      sidebar.innerHTML = '<div style="color:#475569">No recent trades for ' + esc(ticker) + '</div>';
+      sidebar.innerHTML = '<div style="color:#475569;font-size:12px">No trades found for ' + esc(ticker) + '</div>';
       return;
     }
 
     const rows = trades.map(r => {
       const isBuy = (r.action||'').toLowerCase().includes('buy');
       const optBadge = r.option_type
-        ? `<span class="badge badge-${r.option_type}" style="font-size:10px">${r.option_type}</span>`
+        ? `<span class="badge badge-${r.option_type}" style="font-size:10px;padding:1px 5px">${r.option_type}</span>`
         : '';
       return `<tr>
-        <td style="color:#64748b;font-size:11px">${r.trade_date}</td>
-        <td class="${isBuy ? 'pos' : 'neg'}" style="font-size:11px">${esc(r.action)}</td>
-        <td style="font-size:11px">${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
-        <td style="font-size:11px">${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
-        <td style="font-size:11px">${optBadge}</td>
-        <td style="font-size:11px">${r.option_strike != null ? '$' + fmt(r.option_strike) : ''}</td>
-        <td style="font-size:11px;color:#64748b">${r.option_expiry || ''}</td>
+        <td style="color:#64748b">${r.trade_date}</td>
+        <td class="${isBuy ? 'pos' : 'neg'}">${esc(r.action)}</td>
+        <td>${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
+        <td>${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
+        <td>${optBadge}</td>
+        <td>${r.option_strike != null ? '$' + fmt(r.option_strike) : ''}</td>
+        <td style="color:#64748b">${r.option_expiry || ''}</td>
       </tr>`;
     }).join('');
 
     const cur = ladderRecentState.page, total_pages = ladderRecentState.pages;
     const prevDisabled = cur <= 1 ? 'disabled' : '';
     const nextDisabled = cur >= total_pages ? 'disabled' : '';
-    const pagination = total_pages > 1 ? `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px">
-        <button class="pg-btn" ${prevDisabled} onclick="loadLadderRecent(${cur - 1})">‹ Prev</button>
-        <span class="pg-info">Page ${cur} of ${total_pages} · ${res.total.toLocaleString()} trades</span>
-        <button class="pg-btn" ${nextDisabled} onclick="loadLadderRecent(${cur + 1})">Next ›</button>
-      </div>` : `<div class="pg-info" style="margin-top:6px">${res.total.toLocaleString()} trades</div>`;
+    const pagination = total_pages > 1
+      ? `<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:6px">
+           <button class="pg-btn" ${prevDisabled} onclick="loadLadderRecent(${cur - 1})">‹ Prev</button>
+           <span class="pg-info">Page ${cur} of ${total_pages} · ${res.total.toLocaleString()} trades</span>
+           <button class="pg-btn" ${nextDisabled} onclick="loadLadderRecent(${cur + 1})">Next ›</button>
+         </div>`
+      : `<div class="pg-info" style="margin-top:6px">${res.total.toLocaleString()} trades</div>`;
 
     sidebar.innerHTML =
-      '<table style="width:100%"><thead><tr>' +
+      '<table><thead><tr>' +
       '<th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Type</th><th>Strike</th><th>Expiry</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>' + pagination;
   } catch(e) {
     sidebar.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
   }
+}
+
+// ── Ladder Open Orders ────────────────────────────────────────────
+let _ladderOrders = [];
+
+async function loadLadderOrders() {
+  const ticker = document.getElementById('lad-ticker').value.trim().toUpperCase();
+  const container = document.getElementById('lad-orders');
+  const countDiv = document.getElementById('lad-orders-count');
+  const cancelAllBtn = document.getElementById('lad-cancel-all-btn');
+  const includeOpts = document.getElementById('lad-orders-include-options').checked;
+
+  if (!ticker) {
+    container.innerHTML = '<div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>';
+    countDiv.textContent = '';
+    cancelAllBtn.style.display = 'none';
+    _ladderOrders = [];
+    return;
+  }
+
+  container.innerHTML = '<div class="loading" style="padding:8px">Loading orders…</div>';
+  countDiv.textContent = '';
+  cancelAllBtn.style.display = 'none';
+
+  try {
+    const raw = await fetch('/api/orders').then(r => r.json());
+    if (raw.error) throw new Error(raw.error);
+
+    let orders = raw.filter(o =>
+      o.underlying === ticker || o.symbol === ticker || o.underlying.startsWith(ticker));
+
+    const eqOrders = orders.filter(o => o.asset_type === 'EQUITY');
+    const optOrders = orders.filter(o => o.asset_type !== 'EQUITY');
+
+    if (!includeOpts) orders = eqOrders;
+
+    _ladderOrders = orders;
+
+    countDiv.innerHTML = `${orders.length} open order${orders.length !== 1 ? 's' : ''} `
+      + `<span style="color:#475569">(${eqOrders.length} equity / ${optOrders.length} option)</span>`;
+
+    if (orders.length === 0) {
+      container.innerHTML = '<div style="color:#475569;font-size:12px">No open orders for ' + esc(ticker) + '</div>';
+      return;
+    }
+
+    cancelAllBtn.style.display = '';
+
+    const rows = orders.map(o => {
+      const sideClass = (o.instruction || '').includes('SELL') ? 'neg' : 'pos';
+      const priceStr = o.price != null ? '$' + fmt(o.price, 2)
+                     : o.stop_price != null ? 'Stop $' + fmt(o.stop_price) : '—';
+      const isOpt = o.asset_type !== 'EQUITY';
+      const symbolLabel = isOpt
+        ? `<span style="color:#94a3b8" title="${esc(o.symbol)}">${esc(o.symbol.substring(0, 20))}</span>`
+        : '';
+      const cancelBtn = o.cancelable
+        ? `<button class="cancel-single-btn" onclick="cancelLadderOrder('${esc(o.order_id)}')">✕</button>`
+        : '';
+      return `<tr>
+        <td><span class="${sideClass}">${esc(o.instruction)}</span></td>
+        <td>${fmt(o.quantity, 0)}</td>
+        <td>${priceStr}</td>
+        <td><span class="badge badge-status-${o.status}" style="font-size:9px;padding:1px 5px">${o.status}</span></td>
+        <td>${symbolLabel}</td>
+        <td>${cancelBtn}</td>
+      </tr>`;
+    }).join('');
+
+    container.innerHTML =
+      '<table><thead><tr>' +
+      '<th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th>Symbol</th><th></th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+  } catch (e) {
+    container.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
+    countDiv.textContent = '';
+  }
+}
+
+async function cancelLadderOrder(orderId) {
+  if (!confirm('Cancel order ' + orderId + '?')) return;
+  try {
+    const res = await fetch('/api/order/' + orderId, { method: 'DELETE' }).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+    ordersState.loaded = false;
+    await loadLadderOrders();
+  } catch (e) {
+    alert('Failed to cancel: ' + e.message);
+  }
+}
+
+async function cancelAllLadderOrders() {
+  const cancelable = _ladderOrders.filter(o => o.cancelable);
+  if (cancelable.length === 0) {
+    alert('No cancelable orders.');
+    return;
+  }
+
+  const ticker = document.getElementById('lad-ticker').value.trim().toUpperCase();
+  if (!confirm(`Cancel ALL ${cancelable.length} open orders for ${ticker}?\n\nThis cannot be undone.`)) return;
+
+  const container = document.getElementById('lad-orders');
+  container.innerHTML = `<div class="loading" style="padding:8px">Cancelling ${cancelable.length} orders…</div>`;
+
+  let ok = 0, fail = 0;
+  for (const o of cancelable) {
+    try {
+      const res = await fetch('/api/order/' + o.order_id, { method: 'DELETE' }).then(r => r.json());
+      if (res.error) throw new Error(res.error);
+      ok++;
+    } catch {
+      fail++;
+    }
+  }
+
+  ordersState.loaded = false;
+
+  if (fail === 0) {
+    container.innerHTML = `<div style="color:#86efac;font-size:12px;padding:6px 0">All ${ok} orders cancelled.</div>`;
+  } else {
+    container.innerHTML = `<div class="error" style="font-size:12px">${ok} cancelled, ${fail} failed. Refreshing…</div>`;
+  }
+
+  setTimeout(() => loadLadderOrders(), 1500);
 }
 
 function previewLadder() {
@@ -802,11 +1238,14 @@ async function submitLadder() {
       const icon = r.status === 'ok'
         ? '<span class="rung-status rung-ok"></span>'
         : '<span class="rung-status rung-fail"></span>';
+      const resultCell = r.status === 'ok'
+        ? `${icon}Order #${esc(r.order_id)}`
+        : `<span style="display:inline-flex;align-items:flex-start;gap:6px">${icon}<span class="neg ladder-result-msg">${esc(r.error)}</span></span>`;
       return `<tr>
         <td>${r.rung}</td>
         <td>${fmt(r.qty, 0)}</td>
         <td>$${fmt(r.price)}</td>
-        <td>${icon}${r.status === 'ok' ? 'Order #' + esc(r.order_id) : '<span class="neg">' + esc(r.error) + '</span>'}</td>
+        <td class="ladder-result-cell">${resultCell}</td>
       </tr>`;
     }).join('');
 
@@ -817,10 +1256,12 @@ async function submitLadder() {
       : `<div class="error">⚠️ ${ok} succeeded, ${fail} failed</div>`;
 
     resultDiv.innerHTML = statusMsg +
-      '<table style="margin-top:10px"><thead><tr><th>#</th><th>Qty</th><th>Price</th><th>Result</th></tr></thead>' +
+      '<table class="ladder-result-table" style="margin-top:10px">' +
+      '<thead><tr><th>#</th><th>Qty</th><th>Price</th><th>Result</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table>' +
       '<div style="margin-top:12px;color:#64748b;font-size:12px">Switch to "Open Orders" to track status.</div>';
     ordersState.loaded = false;
+    setTimeout(() => loadLadderOrders(), 1000);
   } catch(e) {
     resultDiv.innerHTML = '<div class="error">❌ Ladder submission failed: ' + esc(e.message) + '</div>';
   } finally {

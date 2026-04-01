@@ -174,3 +174,190 @@ def get_top_tickers(top_n=10, recent_n=5):
         })
 
     return {"tickers": result}
+
+
+# ── Position-unwind ladder suggestion ─────────────────────────────────────────
+
+# Actions that accumulate a position (and their unwind counterpart)
+_ACCUM_UNWIND = {"Buy": "sell", "Sell Short": "buy_to_cover"}
+
+
+def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
+                            premium_cents=77, min_streak=10, max_rungs=5):
+    """Analyse consecutive same-direction equity trades for *ticker* and
+    generate suggested ladder rungs to unwind the position.
+
+    Returns a dict with streak info, suggested rungs, and the parameters used.
+    """
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT trade_date, action, quantity, price
+        FROM transactions
+        WHERE underlying = ? AND category = 'equity'
+          AND action IN ('Buy', 'Sell', 'Sell Short', 'Buy to Cover')
+        ORDER BY trade_date DESC, id DESC
+    """, [ticker])
+    all_trades = [dict(r) for r in cur.fetchall()]
+    conn.close()
+
+    # most recent trade price as a fallback reference
+    last_trade_price = all_trades[0]["price"] if all_trades else None
+
+    if not all_trades:
+        return {"streak_count": 0, "rungs": [],
+                "note": "No equity trades found for this ticker"}
+
+    # --- find the most recent streak (always the consecutive run from trade[0]) -
+    # The streak direction is always the most recent trade's action — never
+    # dig into history to find a longer one.
+    direction = all_trades[0]["action"]
+    streak = []
+    for t in all_trades:
+        if t["action"] == direction:
+            streak.append(t)
+        else:
+            break   # first different action ends the streak
+
+    unwind_action = _ACCUM_UNWIND.get(direction)   # None for exits (Sell, Buy to Cover)
+
+    # --- handle exit streaks (Sell or Buy to Cover at the top) ---------------
+    if unwind_action is None:
+        # Most recent trades are already exits — show streak context and no rungs
+        total_shares = sum(t["quantity"] for t in streak)
+        return {
+            "streak_count": len(streak),
+            "direction": direction,
+            "unwind_action": None,
+            "total_shares": round(total_shares, 2),
+            "overall_avg": 0,
+            "last_trade_price": last_trade_price,
+            "rungs": [],
+            "params": _pack_params(window_size, sell_pct, premium_cents,
+                                   min_streak, max_rungs),
+            "note": (f"Most recent streak is {len(streak)} consecutive "
+                     f"{direction}(s) — no accumulation to unwind"),
+        }
+
+    if len(streak) < min_streak:
+        total_shares = sum(t["quantity"] for t in streak)
+        total_cost   = sum(t["quantity"] * t["price"] for t in streak)
+        overall_avg  = round(total_cost / total_shares, 4) if total_shares else 0
+        return {
+            "streak_count": len(streak),
+            "direction": direction,
+            "unwind_action": unwind_action,
+            "total_shares": round(total_shares, 2),
+            "overall_avg": overall_avg,
+            "last_trade_price": last_trade_price,
+            "rungs": [],
+            "params": _pack_params(window_size, sell_pct, premium_cents,
+                                   min_streak, max_rungs),
+            "note": (f"Only {len(streak)} consecutive "
+                     f"{direction} trades found (minimum: {min_streak})"),
+        }
+
+    # --- aggregate streak stats ---------------------------------------------
+    total_shares = sum(t["quantity"] for t in streak)
+    total_cost = sum(t["quantity"] * t["price"] for t in streak)
+    overall_avg = round(total_cost / total_shares, 4) if total_shares else 0
+
+    is_long = (direction == "Buy")
+    premium = premium_cents / 100.0
+
+    # --- windowed rung generation -------------------------------------------
+    rungs = []
+    cursor = 0        # current index into *streak*
+    consumed = 0.0    # shares already consumed from streak[cursor]
+    prev_price = None
+
+    while cursor < len(streak) and len(rungs) < max_rungs:
+        # build a window of up to *window_size* trade records
+        window = []
+        idx = cursor
+        first_remaining = streak[idx]["quantity"] - consumed
+        if first_remaining > 0:
+            window.append({"qty": first_remaining,
+                           "price": streak[idx]["price"]})
+        idx += 1
+        while len(window) < window_size and idx < len(streak):
+            window.append({"qty": streak[idx]["quantity"],
+                           "price": streak[idx]["price"]})
+            idx += 1
+
+        if not window:
+            break
+
+        win_shares = sum(w["qty"] for w in window)
+        if win_shares <= 0:
+            break
+        win_cost = sum(w["qty"] * w["price"] for w in window)
+        win_avg = win_cost / win_shares
+
+        sell_qty = math.ceil(win_shares * sell_pct)
+        if sell_qty <= 0:
+            break
+
+        # snap price: find the nearest $X.{premium_cents} above/below avg
+        if is_long:
+            base = math.floor(win_avg)
+            target = base + premium
+            if target <= win_avg:
+                target += 1.0
+            # monotonicity: each rung must be strictly higher than the last
+            if prev_price is not None:
+                while target <= prev_price:
+                    target += 1.0
+        else:
+            base = math.ceil(win_avg)
+            target = base - premium
+            if target >= win_avg:
+                target -= 1.0
+            if prev_price is not None:
+                while target >= prev_price:
+                    target -= 1.0
+
+        target = round(target, 2)
+        prev_price = target
+
+        rungs.append({
+            "qty": sell_qty,
+            "price": target,
+            "window_avg": round(win_avg, 4),
+            "window_shares": round(win_shares, 2),
+            "window_trades": len(window),
+        })
+
+        # consume sell_qty shares starting from the most-recent end
+        remaining = sell_qty
+        while remaining > 0 and cursor < len(streak):
+            available = streak[cursor]["quantity"] - consumed
+            if available <= remaining:
+                remaining -= available
+                consumed = 0.0
+                cursor += 1
+            else:
+                consumed += remaining
+                remaining = 0
+
+    return {
+        "direction": direction,
+        "unwind_action": unwind_action,
+        "streak_count": len(streak),
+        "total_shares": round(total_shares, 2),
+        "overall_avg": overall_avg,
+        "last_trade_price": last_trade_price,
+        "rungs": rungs,
+        "params": _pack_params(window_size, sell_pct, premium_cents,
+                               min_streak, max_rungs),
+    }
+
+
+def _pack_params(window_size, sell_pct, premium_cents, min_streak, max_rungs):
+    return {
+        "window_size": window_size,
+        "sell_pct": sell_pct,
+        "premium_cents": premium_cents,
+        "min_streak": min_streak,
+        "max_rungs": max_rungs,
+    }
