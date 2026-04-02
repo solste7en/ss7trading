@@ -232,8 +232,9 @@ def parse_schwab_transaction(tx: dict) -> dict | None:
     into the shape expected by our transactions table.
     Returns None if the transaction should be skipped.
     """
-    tx_type  = tx.get("type", "")
-    tx_desc  = tx.get("description", "")
+    tx_type     = tx.get("type", "")
+    tx_desc     = tx.get("description", "")
+    activity_id = tx.get("activityId") or tx.get("transactionId")
 
     # Use execution time as trade_date — tradeDate in the API is T+1 settlement,
     # but the CSV "Date" column records the execution date (same as "time" field).
@@ -431,6 +432,7 @@ def parse_schwab_transaction(tx: dict) -> dict | None:
         "option_type":   opt_type,
         "option_strike": opt_strike,
         "option_expiry": opt_expiry,
+        "activity_id":   int(activity_id) if activity_id is not None else None,
     }
 
 # ── dedup key (same logic as import_schwab_transactions.py) ──────────────────
@@ -480,23 +482,36 @@ SELL_ALIASES = {"Sell", "Sell Short"}
 def build_dedup_structures(cur: sqlite3.Cursor, buffer_date: str):
     """Load existing rows from DB and build exact + fuzzy dedup indexes."""
     cur.execute("""
-        SELECT trade_date, action, symbol, amount
+        SELECT trade_date, action, symbol, amount, activity_id
         FROM transactions WHERE trade_date >= ?
     """, (buffer_date,))
     existing_rows = cur.fetchall()
-    exact_set = set(existing_rows)
+    exact_set = set((d, a, s, amt) for d, a, s, amt, _ in existing_rows)
+    activity_id_set = set(aid for _, _, _, _, aid in existing_rows if aid is not None)
     fuzzy_idx = defaultdict(list)
-    for d, a, s, amt in existing_rows:
+    for d, a, s, amt, _ in existing_rows:
         fuzzy_idx[(a, s)].append((d, amt))
-    return exact_set, fuzzy_idx
+    return exact_set, activity_id_set, fuzzy_idx
 
 
-def is_duplicate(row: dict, exact_set: set, fuzzy_idx: dict) -> bool:
+def is_duplicate(row: dict, exact_set: set, activity_id_set: set, fuzzy_idx: dict) -> bool:
     """Return True if this row is already represented in the DB."""
+    # Primary gate: activityId uniquely identifies a Schwab transaction.
+    # If found in the set, it's a confirmed duplicate — return immediately.
+    aid = row.get("activity_id")
+    if aid is not None and aid in activity_id_set:
+        return True
+
     key = dedup_key(row)
     if key in exact_set:
         return True
-    # Fuzzy check: same action+symbol, date within ±2 days, amount within 2%
+
+    # Fuzzy match ONLY for income/transfer — these can have minor rounding differences
+    # between exports. Never fuzzy-match equity/option trades: same-day trades at
+    # similar prices (e.g. multiple Sell Short lots of the same stock) are distinct.
+    if row.get("category") not in ("income", "transfer"):
+        return False
+
     action_keys = [(row["action"], row["symbol"])]
     if row["action"] in SELL_ALIASES:
         for alt in SELL_ALIASES - {row["action"]}:
@@ -521,12 +536,10 @@ def is_duplicate(row: dict, exact_set: set, fuzzy_idx: dict) -> bool:
                 if day_diff == 0:
                     return True
                 continue
-            # Zero-amount events (expirations)
             if abs(row_amt) < 0.01:
                 if abs(float(cand_amt)) < 0.01 and day_diff <= 2:
                     return True
                 continue
-            # Amount within 2% (for partial-fill aggregation differences)
             pct_diff = abs(row_amt - float(cand_amt)) / max(abs(row_amt), 0.01)
             if pct_diff < 0.02:
                 return True
@@ -535,9 +548,11 @@ def is_duplicate(row: dict, exact_set: set, fuzzy_idx: dict) -> bool:
     return False
 
 
-def record_in_dedup(row: dict, exact_set: set, fuzzy_idx: dict):
+def record_in_dedup(row: dict, exact_set: set, activity_id_set: set, fuzzy_idx: dict):
     """Add a newly inserted row to the dedup structures so subsequent rows see it."""
     exact_set.add(dedup_key(row))
+    if row.get("activity_id") is not None:
+        activity_id_set.add(row["activity_id"])
     fuzzy_idx[(row["action"], row["symbol"])].append((row["trade_date"], row["amount"]))
 
 # ── ticker resolution pass ────────────────────────────────────────────────────
@@ -586,7 +601,7 @@ def sync(lookback_days: int = 2):
     cur  = conn.cursor()
 
     buffer_date = (datetime.now() - timedelta(days=lookback_days + 3)).strftime("%Y-%m-%d")
-    exact_set, fuzzy_idx = build_dedup_structures(cur, buffer_date)
+    exact_set, activity_id_set, fuzzy_idx = build_dedup_structures(cur, buffer_date)
 
     inserted = skipped = errors = 0
     for raw in raw_txs:
@@ -596,19 +611,19 @@ def sync(lookback_days: int = 2):
                 skipped += 1
                 continue
             enrich_ticker(row, conn)
-            if is_duplicate(row, exact_set, fuzzy_idx):
+            if is_duplicate(row, exact_set, activity_id_set, fuzzy_idx):
                 skipped += 1
                 continue
             cur.execute("""
                 INSERT INTO transactions
                     (trade_date, action, category, symbol, underlying, description,
                      quantity, price, fees, amount,
-                     is_option, option_type, option_strike, option_expiry)
+                     is_option, option_type, option_strike, option_expiry, activity_id)
                 VALUES (:trade_date,:action,:category,:symbol,:underlying,:description,
                         :quantity,:price,:fees,:amount,
-                        :is_option,:option_type,:option_strike,:option_expiry)
+                        :is_option,:option_type,:option_strike,:option_expiry,:activity_id)
             """, row)
-            record_in_dedup(row, exact_set, fuzzy_idx)
+            record_in_dedup(row, exact_set, activity_id_set, fuzzy_idx)
             inserted += 1
             log.info("  + %s | %s | %s | qty=%s | $%s",
                      row["trade_date"], row["action"], row["symbol"],
@@ -666,7 +681,7 @@ def dry_run(lookback_days: int = 7):
     conn        = sqlite3.connect(DB_PATH)
     cur         = conn.cursor()
     buffer_date = (datetime.now() - timedelta(days=lookback_days + 3)).strftime("%Y-%m-%d")
-    exact_set, fuzzy_idx = build_dedup_structures(cur, buffer_date)
+    exact_set, activity_id_set, fuzzy_idx = build_dedup_structures(cur, buffer_date)
 
     new_rows = already_in_db = parse_errors = 0
     for raw in raw_txs:
@@ -675,7 +690,7 @@ def dry_run(lookback_days: int = 7):
             if row is None:
                 continue
             enrich_ticker(row, conn)
-            if is_duplicate(row, exact_set, fuzzy_idx):
+            if is_duplicate(row, exact_set, activity_id_set, fuzzy_idx):
                 already_in_db += 1
                 log.info("  = EXISTING  %s | %s | %-8s | %s | $%s",
                          row["trade_date"], row["action"], row["category"],
