@@ -300,6 +300,111 @@ def api_ladder_suggest():
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
+# ── Option chain endpoints ─────────────────────────────────────────────────────
+
+@app.route("/api/option-expirations/<symbol>")
+def api_option_expirations(symbol):
+    """Return available option expiration dates for a symbol."""
+    try:
+        client = get_client()
+        resp = client.get_option_expiration_chain(symbol.upper())
+        resp.raise_for_status()
+        raw = resp.json() or {}
+        expirations = []
+        for item in raw.get("expirationList", []):
+            date_str = item.get("expirationDate", "")
+            if date_str:
+                expirations.append(date_str[:10])
+        return jsonify({"symbol": symbol.upper(), "expirations": sorted(expirations)})
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+def _clean_option_map(exp_date_map):
+    """Flatten Schwab's nested {expiryDate: {strike: [contracts]}} into a simple list."""
+    result = {}
+    for exp_key, strikes in (exp_date_map or {}).items():
+        exp_date = exp_key.split(":")[0]
+        contracts = []
+        for strike_key, chain_items in strikes.items():
+            for c in chain_items:
+                contracts.append({
+                    "strike":      c.get("strikePrice"),
+                    "bid":         c.get("bid"),
+                    "ask":         c.get("ask"),
+                    "last":        c.get("last"),
+                    "volume":      c.get("totalVolume", 0),
+                    "oi":          c.get("openInterest", 0),
+                    "iv":          c.get("volatility"),
+                    "delta":       c.get("delta"),
+                    "symbol":      c.get("symbol", ""),
+                    "itm":         c.get("inTheMoney", False),
+                    "description": c.get("description", ""),
+                })
+        contracts.sort(key=lambda x: x["strike"] or 0)
+        result[exp_date] = contracts
+    return result
+
+
+@app.route("/api/option-chain")
+def api_option_chain():
+    """Return the option chain for a symbol, simplified for the UI."""
+    try:
+        symbol       = request.args.get("symbol", "").strip().upper()
+        if not symbol:
+            return jsonify({"error": "symbol is required"}), 400
+        strike_count = min(40, max(5, int(request.args.get("strike_count", 15))))
+        contract_type = request.args.get("contract_type", "ALL").upper()
+
+        ct_map = {"ALL": None, "CALL": "CALL", "PUT": "PUT"}
+        ct = ct_map.get(contract_type)
+
+        client = get_client()
+        kwargs = dict(
+            symbol=symbol,
+            strike_count=strike_count,
+            include_underlying_quote=True,
+        )
+        if ct:
+            kwargs["contract_type"] = ct
+
+        from_date = request.args.get("from_date")
+        to_date   = request.args.get("to_date")
+        if from_date:
+            kwargs["from_date"] = datetime.date.fromisoformat(from_date)
+        if to_date:
+            kwargs["to_date"] = datetime.date.fromisoformat(to_date)
+
+        resp = client.get_option_chain(**kwargs)
+        resp.raise_for_status()
+        raw = resp.json() or {}
+
+        underlying = raw.get("underlying", {})
+        underlying_clean = {
+            "symbol": underlying.get("symbol", symbol),
+            "last":   underlying.get("last"),
+            "bid":    underlying.get("bid"),
+            "ask":    underlying.get("ask"),
+            "change": underlying.get("change"),
+            "change_pct": underlying.get("percentChange"),
+            "volume": underlying.get("totalVolume"),
+        }
+
+        calls = _clean_option_map(raw.get("callExpDateMap"))
+        puts  = _clean_option_map(raw.get("putExpDateMap"))
+        all_exps = sorted(set(list(calls.keys()) + list(puts.keys())))
+
+        return jsonify({
+            "symbol":      symbol,
+            "underlying":  underlying_clean,
+            "expirations": all_exps,
+            "calls":       calls,
+            "puts":        puts,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
 # ── Order helpers ──────────────────────────────────────────────────────────────
 
 def _get_account_hash():

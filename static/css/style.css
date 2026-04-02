@@ -85,7 +85,13 @@ tr:hover td { background: #1a1d2e; }
 .toggle-btn.active { background: #312e81; border-color: #6366f1; color: #a5b4fc; }
 .toggle-btn:hover:not(.active) { border-color: #4338ca; color: #e2e8f0; }
 
-.trade-form { background: #131621; border: 1px solid #1e2235; border-radius: 10px; padding: 20px 24px; max-width: 720px; }
+/* Trade tab layout: two-column */
+.trade-layout { display: grid; grid-template-columns: minmax(340px, 1fr) 420px; gap: 16px; }
+@media (max-width: 1080px) { .trade-layout { grid-template-columns: 1fr; } }
+.trade-forms-col { min-width: 0; }
+.trade-info-col  { min-width: 0; }
+
+.trade-form { background: #131621; border: 1px solid #1e2235; border-radius: 10px; padding: 20px 24px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px; }
 .form-group label { display: block; font-size: 11px; color: #64748b; text-transform: uppercase;
   letter-spacing: 0.05em; margin-bottom: 5px; }
@@ -228,3 +234,89 @@ tr:hover td { background: #1a1d2e; }
 .ticker-card .btn-ladder { background: #312e81; color: #a5b4fc; border: 1px solid #4338ca;
   border-radius: 5px; padding: 4px 10px; cursor: pointer; font-size: 11px; text-decoration: none; }
 .ticker-card .btn-ladder:hover { background: #3730a3; }
+
+/* ── Trade info panel (right column) ── */
+.trade-quote-card { background: #131621; border: 1px solid #1e2235; border-radius: 10px; padding: 14px 18px;
+  margin-bottom: 12px; }
+.tqc-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.tqc-sym    { font-size: 20px; font-weight: 700; }
+.tqc-desc   { font-size: 12px; color: #64748b; }
+.tqc-price  { font-size: 28px; font-weight: 700; margin-bottom: 6px; }
+.tqc-grid   { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px 16px; }
+.tqc-grid label { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+.tqc-grid .val  { font-size: 13px; color: #e2e8f0; }
+
+.trade-chart-wrap { background: #131621; border: 1px solid #1e2235; border-radius: 10px;
+  overflow: hidden; height: 420px; margin-bottom: 12px; }
+
+/* ── Position summary panel (Trade right col + Ladder sidebar top) ── */
+.position-summary-bar {
+  background: #161a2a; border: 1px solid #2d3148; border-radius: 10px; padding: 10px 14px;
+  margin-bottom: 10px; font-size: 12px; line-height: 1.45; color: #e2e8f0;
+}
+
+.pos-sum-panel {
+  background: #161a2a; border: 1px solid #2d3148; border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 14px; font-size: 12px;
+}
+.pos-sum-panel-header {
+  font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;
+  font-weight: 600; margin-bottom: 8px;
+}
+.pos-sum-panel-loading { color: #64748b; font-size: 12px; padding: 4px 0; }
+.pos-sum-none  { color: #94a3b8; font-size: 12px; padding: 2px 0; }
+.pos-sum-err   { color: #f87171; font-size: 12px; }
+
+.pos-sum-table-wrap { overflow-x: auto; }
+.pos-sum-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.pos-sum-table th {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #475569; padding: 0 6px 5px 6px; text-align: left; white-space: nowrap;
+  border-bottom: 1px solid #2d3148;
+}
+.pos-sum-table td { padding: 5px 6px; white-space: nowrap; vertical-align: middle; }
+.pos-sum-table tbody tr + tr td { border-top: 1px solid #1e2235; }
+.pos-num    { text-align: right; font-weight: 600; color: #f1f5f9; font-size: 12px; }
+.pos-detail { color: #94a3b8; font-size: 11px; }
+.pos-mkt    { text-align: right; font-size: 11px; color: #cbd5e1; }
+
+/* Badges */
+.pos-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.03em; line-height: 1.5;
+}
+.pos-badge-call  { background: rgba(52, 211, 153, 0.18); color: #6ee7b7; border: 1px solid rgba(52,211,153,0.3); }
+.pos-badge-put   { background: rgba(248, 113, 113, 0.18); color: #fca5a5; border: 1px solid rgba(248,113,113,0.3); }
+.pos-badge-stock { background: rgba(148, 163, 184, 0.15); color: #cbd5e1;  border: 1px solid rgba(148,163,184,0.25); }
+.pos-badge-opt   { background: rgba(167, 139, 250, 0.18); color: #c4b5fd; border: 1px solid rgba(167,139,250,0.3); }
+.pos-badge-long  { background: rgba(56, 189, 248, 0.18); color: #7dd3fc; border: 1px solid rgba(56,189,248,0.3); }
+.pos-badge-short { background: rgba(251, 191, 36, 0.15); color: #fde68a; border: 1px solid rgba(251,191,36,0.25); }
+
+/* ── Option chain table ── */
+#trade-chain-wrap { margin-top: 14px; }
+.trade-chain-header { display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+.trade-chain-header h3 { font-size: 12px; color: #94a3b8; text-transform: uppercase;
+  letter-spacing: 0.05em; font-weight: 500; margin: 0; }
+.trade-chain-controls { display: flex; align-items: center; gap: 8px; }
+.trade-chain-controls select { background: #1a1d2e; border: 1px solid #2d3148; border-radius: 5px;
+  color: #e2e8f0; padding: 5px 8px; font-size: 12px; outline: none; }
+.trade-chain-controls select:focus { border-color: #6366f1; }
+.chain-table { width: 100%; border-collapse: collapse; font-size: 11px; color: #e2e8f0; }
+.chain-table th { font-size: 10px; padding: 5px 6px; white-space: nowrap; text-align: center; font-weight: 600; }
+.chain-table td { padding: 4px 6px; white-space: nowrap; text-align: right; }
+.chain-th-calls { background: #0f2847; color: #bae6fd; }
+.chain-th-strike { background: #252a3e; color: #f1f5f9; }
+.chain-th-puts  { background: #3f1518; color: #fecaca; }
+.chain-td-strike {
+  text-align: center; font-weight: 600; color: #f8fafc; background: #252a3e;
+  border-left: 1px solid #3d4258; border-right: 1px solid #3d4258;
+}
+.chain-td-call { background: rgba(56, 189, 248, 0.12); color: #e0f2fe; }
+.chain-td-put  { background: rgba(248, 113, 113, 0.12); color: #fee2e2; }
+.chain-td-itm.chain-td-call { background: rgba(99, 102, 241, 0.22); color: #e0e7ff; }
+.chain-td-itm.chain-td-put  { background: rgba(99, 102, 241, 0.22); color: #e0e7ff; }
+.chain-row:hover .chain-td-call { background: rgba(56, 189, 248, 0.22); cursor: pointer; }
+.chain-row:hover .chain-td-put  { background: rgba(248, 113, 113, 0.22); cursor: pointer; }
+.chain-row:hover .chain-td-strike { background: #32384e; cursor: pointer; }
+.chain-click-hint { font-size: 10px; color: #64748b; margin-top: 6px; }

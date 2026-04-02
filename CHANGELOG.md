@@ -4,6 +4,39 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [0.1.2] — 2026-04-01
+
+Trade tab and Ladder tab improvements: live TradingView chart, option chain browser, current holdings panel with color-coded table.
+
+### Trade tab overhaul
+
+- **Two-column layout**: left column holds the order form; right column holds a live quote card, TradingView chart, and option chain browser
+- **Live quote card**: on ticker entry, fetches real-time bid/ask, last price, change/%, volume, and 52-week range via `GET /api/quote/<symbol>`; pre-fills the limit price field
+- **TradingView Advanced Chart embed**: dynamically injects the TradingView widget using `createElement`/`appendChild` (fixes script execution vs. `innerHTML`); exchange auto-detected (AMEX for ETFs, NYSE for major names, NASDAQ default); `allow_symbol_change` enabled
+- **Option chain browser**: expiration date selector via `GET /api/option-expirations/<symbol>`; chain table populated via `GET /api/option-chain`; click any cell to auto-fill the option form fields (strike, expiry, option type)
+- **Option chain contrast**: headers use stronger blue/red backgrounds (`#0f2847` / `#3f1518`); cells have tinted call/put backgrounds; ITM rows highlighted; hover states per side; body text `#e2e8f0`
+
+### Holdings panel (Trade + Ladder tabs)
+
+- **Current holdings** displayed immediately when a ticker is entered, on both the Trade and Ladder tabs
+- Fetches `GET /api/positions` and matches equity by exact symbol and options by OCC symbol prefix
+- Rendered as a mini table with columns: **Type** · **Side** · **Qty** · **Detail** · **Mkt Value**
+- Color-coded badges: `CALL` (green), `PUT` (red), `STOCK` (slate), `Long` (blue), `Short` (amber)
+- Option descriptions parsed from Schwab format (`04/02/2026 $13 Put` → `Apr 2 '26  $13.00`)
+- Large quantities formatted with commas (17,577 not 17577)
+- Panel clears when ticker field is cleared
+
+### Ladder tab layout
+
+- Holdings panel moved from the left form column to the **top of the right sidebar**, above Recent Trades — keeps the form uncluttered and mirrors the Trade tab layout
+
+### New API endpoints
+
+- `GET /api/option-expirations/<symbol>` — returns available expiration dates for a symbol's option chain
+- `GET /api/option-chain` — returns calls and puts for a symbol/expiry range, grouped by expiration and keyed by strike
+
+---
+
 ## [0.1.1] — 2026-03-31
 
 Dashboard restructure and new features: Overview tab, Ladder trade tab, and codebase refactoring.

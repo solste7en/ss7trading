@@ -60,22 +60,30 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 | **Quote Lookup** | Live quote for any symbol + quotes for all held positions |
 | **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword |
 | **Realized G/L** | Closed-position gain/loss, filterable by ticker and short/long term |
-| **Trade** | Place equity/ETF or single-leg option orders with preview confirmation |
-| **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); recent trades sidebar with pagination |
+| **Trade** | Place equity/ETF or single-leg option orders; live quote card, TradingView chart, option chain browser (click-to-fill), and current holdings panel |
+| **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); current holdings panel + recent trades/open orders sidebar |
 | **Open Orders** | All working/queued orders with sortable columns, filters, and cancel buttons |
 
 ---
+
+## Trade tab
+
+The **Trade** tab supports both equity and single-leg option order entry in a two-column layout:
+
+- **Left column** — order form (equity or option, switchable); order type, duration, session, preview/confirm flow
+- **Right column** — live quote card (bid/ask, change, volume, 52W range); **TradingView Advanced Chart** (auto-loaded on ticker entry); **option chain browser** (select expiration, click any row to fill strike/expiry/type); **current holdings panel** (see open stock and option positions for the ticker before placing the trade)
 
 ## Ladder orders
 
 The **Ladder** tab lets you submit multiple limit orders at different price levels in one action:
 
 1. Enter ticker, action (Buy/Sell/Sell Short/Buy to Cover), duration, session
-2. Use **Quick Fill** to auto-generate rungs (even split, scale up, scale down)
-3. Or manually add/remove rungs with custom qty and price
-4. **Preview** → **Confirm** submits all orders; per-rung success/failure is shown
+2. The **holdings panel** at the top of the sidebar shows your current position for the ticker
+3. Use **Quick Fill** to auto-generate rungs (even split, scale up, scale down)
+4. Or manually add/remove rungs with custom qty and price
+5. **Preview** → **Confirm** submits all orders; per-rung success/failure is shown
 
-The sidebar shows recent trades (equity + options with strike/expiry) for the selected ticker, paginated 20 per page.
+The sidebar also shows recent trades (equity + options with strike/expiry) for the selected ticker, paginated 20 per page, and all open orders for that ticker.
 
 ---
 
@@ -111,6 +119,8 @@ python3 sync_trades.py --dry-run    # preview without writing
 | `/api/order` | POST | Place equity or option order |
 | `/api/order/ladder` | POST | Place a ladder of limit orders |
 | `/api/order/<id>` | DELETE | Cancel an order |
+| `/api/option-expirations/<symbol>` | GET | Available option expiration dates for a symbol |
+| `/api/option-chain` | GET | Calls and puts grouped by expiration and strike |
 | `/api/test` | GET | Connectivity test |
 
 ---

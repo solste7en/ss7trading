@@ -129,135 +129,177 @@
 
 <!-- ── Trade ── -->
 <div class="panel" id="tab-trade">
-  <div class="trade-toggle">
-    <button class="toggle-btn active" id="btn-equity" onclick="setTradeMode('equity')">📈 Stock / ETF</button>
-    <button class="toggle-btn"        id="btn-option" onclick="setTradeMode('option')">🎯 Option (Single Leg)</button>
-  </div>
+  <div class="trade-layout">
+    <!-- LEFT: forms -->
+    <div class="trade-forms-col">
+      <div class="trade-toggle">
+        <button class="toggle-btn active" id="btn-equity" onclick="setTradeMode('equity')">Stock / ETF</button>
+        <button class="toggle-btn"        id="btn-option" onclick="setTradeMode('option')">Option (Single Leg)</button>
+      </div>
 
-  <!-- Equity / ETF form -->
-  <div id="form-equity" class="trade-form">
-    <div class="form-grid">
-      <div class="form-group">
-        <label>Ticker</label>
-        <input type="text" id="eq-ticker" placeholder="NVDA" maxlength="10">
+      <!-- Equity / ETF form -->
+      <div id="form-equity" class="trade-form">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Ticker</label>
+            <input type="text" id="eq-ticker" placeholder="NVDA" maxlength="10"
+                   onkeydown="if(event.key==='Enter') onTradeTickerChange()"
+                   onchange="onTradeTickerChange()">
+          </div>
+          <div class="form-group">
+            <label>Action</label>
+            <select id="eq-action">
+              <option value="buy">Buy</option>
+              <option value="sell">Sell</option>
+              <option value="sell_short">Sell Short</option>
+              <option value="buy_to_cover">Buy to Cover</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Quantity (shares)</label>
+            <input type="number" id="eq-qty" placeholder="100" min="1" step="1">
+          </div>
+          <div class="form-group">
+            <label>Order Type</label>
+            <select id="eq-order-type" onchange="updateEqFields()">
+              <option value="limit" selected>Limit</option>
+              <option value="market">Market</option>
+              <option value="stop">Stop</option>
+              <option value="stop_limit">Stop Limit</option>
+            </select>
+          </div>
+          <div class="form-group" id="eq-price-group">
+            <label>Limit Price ($)</label>
+            <input type="number" id="eq-price" placeholder="0.00" step="0.01" min="0">
+          </div>
+          <div class="form-group" id="eq-stop-group" style="display:none">
+            <label>Stop Price ($)</label>
+            <input type="number" id="eq-stop" placeholder="0.00" step="0.01" min="0">
+          </div>
+          <div class="form-group">
+            <label>Duration</label>
+            <select id="eq-duration">
+              <option value="day">Day</option>
+              <option value="gtc">GTC (Good Till Cancelled)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Session</label>
+            <select id="eq-session">
+              <option value="normal">Normal (Market Hours)</option>
+              <option value="seamless">Extended Hours (Pre + Post)</option>
+              <option value="am">Pre-Market Only</option>
+              <option value="pm">Post-Market Only</option>
+            </select>
+          </div>
+        </div>
+        <button class="preview-btn" onclick="previewOrder('equity')">Preview Order →</button>
       </div>
-      <div class="form-group">
-        <label>Action</label>
-        <select id="eq-action">
-          <option value="buy">Buy</option>
-          <option value="sell">Sell</option>
-          <option value="sell_short">Sell Short</option>
-          <option value="buy_to_cover">Buy to Cover</option>
-        </select>
+
+      <!-- Option form -->
+      <div id="form-option" class="trade-form" style="display:none">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Underlying Ticker</label>
+            <input type="text" id="opt-underlying" placeholder="NVDA" maxlength="10"
+                   onkeydown="if(event.key==='Enter') onTradeTickerChange()"
+                   onchange="onTradeTickerChange()">
+          </div>
+          <div class="form-group">
+            <label>Option Type</label>
+            <select id="opt-type">
+              <option value="PUT">PUT</option>
+              <option value="CALL">CALL</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Action</label>
+            <select id="opt-action">
+              <option value="sell_to_open">Sell to Open (short)</option>
+              <option value="buy_to_open">Buy to Open (long)</option>
+              <option value="buy_to_close">Buy to Close</option>
+              <option value="sell_to_close">Sell to Close</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Expiration Date</label>
+            <select id="opt-expiry">
+              <option value="">— enter ticker first —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Strike Price ($)</label>
+            <input type="number" id="opt-strike" placeholder="170.00" step="0.50" min="0">
+          </div>
+          <div class="form-group">
+            <label>Contracts</label>
+            <input type="number" id="opt-contracts" placeholder="1" min="1" step="1" value="1">
+          </div>
+          <div class="form-group">
+            <label>Order Type</label>
+            <select id="opt-order-type" onchange="updateOptFields()">
+              <option value="limit" selected>Limit</option>
+              <option value="market">Market</option>
+            </select>
+          </div>
+          <div class="form-group" id="opt-price-group">
+            <label>Limit Price (per share)</label>
+            <input type="number" id="opt-price" placeholder="0.00" step="0.01" min="0">
+          </div>
+          <div class="form-group">
+            <label>Duration</label>
+            <select id="opt-duration">
+              <option value="day">Day</option>
+              <option value="gtc">GTC (Good Till Cancelled)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Session</label>
+            <select id="opt-session">
+              <option value="normal">Normal (Market Hours)</option>
+              <option value="seamless">Extended Hours (Pre + Post)</option>
+              <option value="am">Pre-Market Only</option>
+              <option value="pm">Post-Market Only</option>
+            </select>
+          </div>
+        </div>
+        <button class="preview-btn" onclick="previewOrder('option')">Preview Order →</button>
       </div>
-      <div class="form-group">
-        <label>Quantity (shares)</label>
-        <input type="number" id="eq-qty" placeholder="100" min="1" step="1">
-      </div>
-      <div class="form-group">
-        <label>Order Type</label>
-        <select id="eq-order-type" onchange="updateEqFields()">
-          <option value="limit" selected>Limit</option>
-          <option value="market">Market</option>
-          <option value="stop">Stop</option>
-          <option value="stop_limit">Stop Limit</option>
-        </select>
-      </div>
-      <div class="form-group" id="eq-price-group">
-        <label>Limit Price ($)</label>
-        <input type="number" id="eq-price" placeholder="0.00" step="0.01" min="0">
-      </div>
-      <div class="form-group" id="eq-stop-group" style="display:none">
-        <label>Stop Price ($)</label>
-        <input type="number" id="eq-stop" placeholder="0.00" step="0.01" min="0">
-      </div>
-      <div class="form-group">
-        <label>Duration</label>
-        <select id="eq-duration">
-          <option value="day">Day</option>
-          <option value="gtc">GTC (Good Till Cancelled)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Session</label>
-        <select id="eq-session">
-          <option value="normal">Normal (Market Hours)</option>
-          <option value="seamless">Extended Hours (Pre + Post)</option>
-          <option value="am">Pre-Market Only</option>
-          <option value="pm">Post-Market Only</option>
-        </select>
+
+      <div id="trade-result"></div>
+
+      <!-- Option chain browser (visible in option mode) -->
+      <div id="trade-chain-wrap" style="display:none">
+        <div class="trade-chain-header">
+          <h3>Option Chain</h3>
+          <div class="trade-chain-controls">
+            <select id="chain-expiry" onchange="loadOptionChain()">
+              <option value="">Select expiration</option>
+            </select>
+            <span id="chain-status" style="font-size:11px;color:#64748b"></span>
+          </div>
+        </div>
+        <div id="chain-table-wrap" class="table-wrap">
+          <div id="chain-content" style="color:#475569;font-size:12px;padding:8px 0">
+            Select an expiration to view the option chain
+          </div>
+        </div>
       </div>
     </div>
-    <button class="preview-btn" onclick="previewOrder('equity')">Preview Order →</button>
-  </div>
 
-  <!-- Option form -->
-  <div id="form-option" class="trade-form" style="display:none">
-    <div class="form-grid">
-      <div class="form-group">
-        <label>Underlying Ticker</label>
-        <input type="text" id="opt-underlying" placeholder="NVDA" maxlength="10">
+    <!-- RIGHT: info panel -->
+    <div class="trade-info-col">
+      <div id="trade-position-panel" class="pos-sum-panel" style="display:none"></div>
+      <!-- Live quote card -->
+      <div id="trade-quote-card" class="trade-quote-card">
+        <div style="color:#475569;font-size:12px;padding:12px 0">Enter a ticker to see live quote</div>
       </div>
-      <div class="form-group">
-        <label>Option Type</label>
-        <select id="opt-type">
-          <option value="PUT">PUT</option>
-          <option value="CALL">CALL</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Action</label>
-        <select id="opt-action">
-          <option value="sell_to_open">Sell to Open (short)</option>
-          <option value="buy_to_open">Buy to Open (long)</option>
-          <option value="buy_to_close">Buy to Close</option>
-          <option value="sell_to_close">Sell to Close</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Expiration Date</label>
-        <input type="date" id="opt-expiry">
-      </div>
-      <div class="form-group">
-        <label>Strike Price ($)</label>
-        <input type="number" id="opt-strike" placeholder="170.00" step="0.50" min="0">
-      </div>
-      <div class="form-group">
-        <label>Contracts</label>
-        <input type="number" id="opt-contracts" placeholder="1" min="1" step="1" value="1">
-      </div>
-      <div class="form-group">
-        <label>Order Type</label>
-        <select id="opt-order-type" onchange="updateOptFields()">
-          <option value="limit" selected>Limit</option>
-          <option value="market">Market</option>
-        </select>
-      </div>
-      <div class="form-group" id="opt-price-group">
-        <label>Limit Price (per share)</label>
-        <input type="number" id="opt-price" placeholder="0.00" step="0.01" min="0">
-      </div>
-      <div class="form-group">
-        <label>Duration</label>
-        <select id="opt-duration">
-          <option value="day">Day</option>
-          <option value="gtc">GTC (Good Till Cancelled)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Session</label>
-        <select id="opt-session">
-          <option value="normal">Normal (Market Hours)</option>
-          <option value="seamless">Extended Hours (Pre + Post)</option>
-          <option value="am">Pre-Market Only</option>
-          <option value="pm">Post-Market Only</option>
-        </select>
+      <!-- TradingView chart -->
+      <div id="trade-chart-wrap" class="trade-chart-wrap">
+        <div style="color:#475569;font-size:12px;padding:40px 0;text-align:center">Chart loads when a ticker is entered</div>
       </div>
     </div>
-    <button class="preview-btn" onclick="previewOrder('option')">Preview Order →</button>
   </div>
-
-  <div id="trade-result"></div>
 </div>
 
 <!-- ── Ladder Trade ── -->
@@ -373,6 +415,9 @@
     </div>
 
     <div class="ladder-sidebar">
+      <!-- Position summary at top of sidebar -->
+      <div id="lad-position-panel" class="pos-sum-panel" style="display:none"></div>
+
       <div class="ladder-sidebar-header">
         <h3>Recent Trades</h3>
         <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;cursor:pointer">
