@@ -4,6 +4,82 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [0.1.5] — 2026-04-02
+
+Major feature release. Introduces the **Income tab** for advanced multi-leg options strategies, enriches the Positions tab, adds watchlist management to the Quote tab, and fixes several usability issues.
+
+### New: Income tab (multi-leg options strategies)
+
+A second strategy tab placed in the Trade group — **Trade | Ladder | Income | Open Orders** — focused on generating income, exiting positions at better prices, and providing downside protection using multi-leg option structures.
+
+**Four strategy modes** (toggle buttons at the top of the left column):
+
+- **Naked Option** — single-leg sell-to-open or buy-to-open; used for covered calls (long equity) and cash-secured puts (short equity)
+- **Vertical Spread** — two same-type option legs, same expiry, different strikes; supports both call credit spreads and put credit spreads
+- **Collar** — simultaneous sell one option + buy the opposite type; targets NET_ZERO for costless protection; works for both long positions (sell call + buy put) and short positions (sell put + buy call)
+- **Equity + Option Bundle** — bundle an equity trade with an option trade as a single composite order
+
+**Suggestion engine (right sidebar):**
+
+- Automatically analyses current positions and option chain on ticker entry
+- For **long positions** (e.g. LYFT): suggests covered calls (with annualized yield), protective collars (near-zero cost), and call credit spreads
+- For **short positions** (e.g. NVDA): suggests cash-secured puts (with annualized yield), short collars, and put credit spreads
+- Detects existing short option positions and suggests close strategies
+- Each suggestion is a **clickable card** that pre-fills the strategy form with recommended strike, expiry, quantity, and estimated premium
+
+**P&L preview (live, updates as you type):**
+
+- Updates in real time as strikes and premiums are adjusted
+- Naked: max profit, max loss (or "Unlimited"), breakeven
+- Vertical spread: net credit/debit, max profit, max loss, breakeven
+- Collar: net cost, protection floor, cap ceiling
+
+**Option chain browser:**
+
+- Same expiration-selector + full chain table as the Trade tab
+- Click any call or put row to fill the active strategy form
+
+**Right sidebar:**
+
+- Current holdings panel (same as Trade/Ladder tabs)
+- Recent option trades for the selected ticker, paginated 15 per page
+- Open orders for the ticker with per-order cancel and Cancel All
+
+**New backend API endpoints:**
+
+- `POST /api/order/strategy` — place a multi-leg order (spread, collar, covered, bundle) using `OrderBuilder` with `VERTICAL`, `COLLAR_SYNTHETIC`, `COVERED`, and `NONE` complex order strategy types
+- `GET /api/strategy-suggest?ticker=` — server-side suggestion engine: fetches positions, live quote, and option chain (2 nearest expirations); returns structured suggestions with pre-filled form values, estimated premiums, and annualized yields
+
+---
+
+### Positions tab enhancements
+
+- **Current price column** (Mkt Price) added to the positions table; computed server-side as `market_value / abs(qty)` for equity/ETF and `market_value / (abs(qty) × 100)` for options
+- **ETF badge**: `COLLECTIVE_INVESTMENT` asset type now mapped to `ETF` and displayed with a distinct teal badge (`#164e45` / `#5eead4`), distinct from Equity and Option
+- **Sortable columns**: click any column header to sort by that field; second click reverses direction; sort arrows rendered inline; client-side sorting preserves backend ordering as the default
+
+---
+
+### Quote tab — watchlist management
+
+- **All Positions** default watchlist shows live quotes for all currently held equity/ETF symbols (same as before, now a proper tab)
+- **Custom watchlists** — create named lists, add/remove symbols, delete lists; persisted in SQLite (`watchlists` + `watchlist_symbols` tables via `db.py`)
+- **Tabbed UI**: watchlist tabs rendered inline; active list highlighted; edit bar with symbol input and Delete List button shown only for custom lists
+- **New API endpoints**:
+  - `GET/POST /api/watchlists` — list all / create new
+  - `DELETE /api/watchlists/<id>` — delete a list
+  - `GET/POST /api/watchlists/<id>/symbols` — list symbols / add symbol
+  - `DELETE /api/watchlists/<id>/symbols/<symbol>` — remove a symbol
+  - `GET /api/quotes/list/<id>` — fetch live quotes for a watchlist
+
+---
+
+### Bug fixes
+
+- **Tab highlight fix**: `switchTab()` now extracts the active tab name from each element's `onclick` attribute rather than relying on DOM index order, which was broken after prior tab reordering
+
+---
+
 ## [0.1.2] — 2026-04-01
 
 Trade tab and Ladder tab improvements: live TradingView chart, option chain browser, current holdings panel with color-coded table.

@@ -1,6 +1,8 @@
 # ss7trading — Schwab API Dashboard
 
-A personal trading dashboard and order management tool built on the Schwab API. Tracks positions and trade history, syncs transactions to a local SQLite database, and supports order entry — including ladder orders — directly from the browser.
+A personal trading dashboard and order management tool built on the Schwab API. Tracks positions and trade history, syncs transactions to a local SQLite database, and supports order entry — including ladder orders and multi-leg options strategies — directly from the browser.
+
+**Current version: 0.1.5**
 
 ---
 
@@ -56,12 +58,13 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 | Tab | Description |
 |-----|-------------|
 | **Overview** | Top 10 most-traded tickers with recent equity trades, paginated; custom ticker lookup with options toggle |
-| **Positions** | Live positions with market value, unrealized P&L, and day P&L |
-| **Quote Lookup** | Live quote for any symbol + quotes for all held positions |
+| **Positions** | Live positions with market value, current price, unrealized P&L, and day P&L; sortable columns; ETF badge |
+| **Quote** | Live quote for any symbol + quotes for held positions or custom watchlists (saved to DB) |
 | **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword |
 | **Realized G/L** | Closed-position gain/loss, filterable by ticker and short/long term |
 | **Trade** | Place equity/ETF or single-leg option orders; live quote card, TradingView chart, option chain browser (click-to-fill), and current holdings panel |
-| **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); current holdings panel + recent trades/open orders sidebar |
+| **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); position unwind suggestion engine; current holdings panel + recent trades/open orders sidebar |
+| **Income** | Multi-leg options strategies: naked option, vertical spread, collar, equity+option bundle; suggestion engine with clickable cards pre-filled from current positions and option chain; live P&L preview (max profit/loss, breakeven); option chain browser; recent trades and open orders sidebar |
 | **Open Orders** | All working/queued orders with sortable columns, filters, and cancel buttons |
 
 ---
@@ -84,6 +87,25 @@ The **Ladder** tab lets you submit multiple limit orders at different price leve
 5. **Preview** → **Confirm** submits all orders; per-rung success/failure is shown
 
 The sidebar also shows recent trades (equity + options with strike/expiry) for the selected ticker, paginated 20 per page, and all open orders for that ticker.
+
+## Income tab (multi-leg options strategies)
+
+The **Income** tab is designed for generating income using options against existing equity positions, exiting at better prices, and creating costless downside protection via collars.
+
+**Four strategy modes:**
+
+- **Naked Option** — sell or buy a single option leg (covered call, cash-secured put, etc.)
+- **Spread** — two same-type legs at different strikes for a net credit or debit (call/put credit spreads)
+- **Collar** — sell one option + buy the opposite type in a single order (long or short position collars; targets NET_ZERO for costless structures)
+- **Equity + Option Bundle** — combine an equity trade and option trade into one composite order
+
+**Workflow:**
+
+1. Enter a ticker — the **suggestion engine** immediately analyses your current position and the option chain, returning ranked strategy cards (covered calls with annualized yield, collar candidates, spread structures)
+2. Click any suggestion card to pre-fill the form with recommended strikes, expiry, and quantity
+3. Browse the inline **option chain** and click any row to adjust strikes
+4. The **P&L preview panel** updates live as you adjust parameters — shows max profit, max loss, breakeven(s), and net credit/debit
+5. **Preview** → **Confirm** submits via `POST /api/order/strategy`
 
 ---
 
@@ -116,11 +138,18 @@ python3 sync_trades.py --dry-run    # preview without writing
 | `/api/realized_gains` | GET | Paginated realized G/L from DB |
 | `/api/top-tickers` | GET | Top 10 tickers with recent equity trades |
 | `/api/orders` | GET | Open/working orders from Schwab |
-| `/api/order` | POST | Place equity or option order |
+| `/api/order` | POST | Place equity or single-leg option order |
 | `/api/order/ladder` | POST | Place a ladder of limit orders |
+| `/api/order/strategy` | POST | Place a multi-leg strategy order (spread, collar, bundle) |
 | `/api/order/<id>` | DELETE | Cancel an order |
 | `/api/option-expirations/<symbol>` | GET | Available option expiration dates for a symbol |
 | `/api/option-chain` | GET | Calls and puts grouped by expiration and strike |
+| `/api/strategy-suggest` | GET | Suggestion engine: position + chain analysis for a ticker |
+| `/api/watchlists` | GET/POST | List all watchlists / create a new one |
+| `/api/watchlists/<id>` | DELETE | Delete a watchlist |
+| `/api/watchlists/<id>/symbols` | GET/POST | List symbols in a watchlist / add a symbol |
+| `/api/watchlists/<id>/symbols/<sym>` | DELETE | Remove a symbol from a watchlist |
+| `/api/quotes/list/<id>` | GET | Live quotes for all symbols in a watchlist |
 | `/api/test` | GET | Connectivity test |
 
 ---
