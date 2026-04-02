@@ -460,3 +460,93 @@ def _pack_params(window_size, sell_pct, premium_cents, min_streak, max_rungs):
         "min_streak": min_streak,
         "max_rungs": max_rungs,
     }
+
+
+# ── Watchlists ──────────────────────────────────────────────────────────────
+
+def _ensure_watchlist_tables(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS watchlists (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT    NOT NULL UNIQUE,
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS watchlist_symbols (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            watchlist_id INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+            symbol       TEXT    NOT NULL,
+            added_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(watchlist_id, symbol)
+        );
+    """)
+    conn.commit()
+
+
+def get_watchlists():
+    conn = _connect()
+    _ensure_watchlist_tables(conn)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT w.id, w.name, COUNT(ws.id) AS symbol_count
+        FROM watchlists w
+        LEFT JOIN watchlist_symbols ws ON ws.watchlist_id = w.id
+        GROUP BY w.id
+        ORDER BY w.name
+    """)
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def create_watchlist(name):
+    conn = _connect()
+    _ensure_watchlist_tables(conn)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO watchlists (name) VALUES (?)", (name,))
+    conn.commit()
+    list_id = cur.lastrowid
+    conn.close()
+    return {"id": list_id, "name": name, "symbol_count": 0}
+
+
+def delete_watchlist(list_id):
+    conn = _connect()
+    _ensure_watchlist_tables(conn)
+    conn.execute("DELETE FROM watchlists WHERE id = ?", (list_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_watchlist_symbols(list_id):
+    conn = _connect()
+    _ensure_watchlist_tables(conn)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT symbol FROM watchlist_symbols WHERE watchlist_id = ? ORDER BY symbol",
+        (list_id,),
+    )
+    syms = [r["symbol"] for r in cur.fetchall()]
+    conn.close()
+    return syms
+
+
+def add_watchlist_symbol(list_id, symbol):
+    conn = _connect()
+    _ensure_watchlist_tables(conn)
+    conn.execute(
+        "INSERT OR IGNORE INTO watchlist_symbols (watchlist_id, symbol) VALUES (?, ?)",
+        (list_id, symbol.upper()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_watchlist_symbol(list_id, symbol):
+    conn = _connect()
+    _ensure_watchlist_tables(conn)
+    conn.execute(
+        "DELETE FROM watchlist_symbols WHERE watchlist_id = ? AND symbol = ?",
+        (list_id, symbol.upper()),
+    )
+    conn.commit()
+    conn.close()

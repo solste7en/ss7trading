@@ -6,19 +6,27 @@ let _debTimer = null;
 function debounce(fn) { clearTimeout(_debTimer); _debTimer = setTimeout(fn, 400); }
 
 // ── tab state ──────────────────────────────────────────────────────
-const TAB_NAMES = ['overview','positions','quotes','history','gains','trade','ladder','orders'];
-let currentTab = 'overview';
+let currentTab = 'positions';
 
 function switchTab(name) {
   currentTab = name;
-  document.querySelectorAll('.tab').forEach((t,i) =>
-    t.classList.toggle('active', TAB_NAMES[i] === name));
+  // Match each tab by extracting its name from the onclick attribute — avoids
+  // any reliance on DOM order which would break after tab reordering.
+  document.querySelectorAll('.tab').forEach(t => {
+    const m = (t.getAttribute('onclick') || '').match(/switchTab\('(\w+)'\)/);
+    t.classList.toggle('active', !!(m && m[1] === name));
+  });
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
-  if (name === 'overview' && !overviewState.loaded)  loadOverview();
-  if (name === 'history'  && !historyState.loaded)   loadHistory();
-  if (name === 'gains'    && !gainsState.loaded)     loadGains();
-  if (name === 'orders'   && !ordersState.loaded)    loadOrders();
+  if (name === 'overview'  && !overviewState.loaded)  loadOverview();
+  if (name === 'history'   && !historyState.loaded)   loadHistory();
+  if (name === 'gains'     && !gainsState.loaded)     loadGains();
+  if (name === 'orders'    && !ordersState.loaded)    loadOrders();
+  if (name === 'quotes')   initWatchlists();
+  if (name === 'strategy' && _stratTicker) {
+    loadStrategySuggestions(_stratTicker);
+    loadStrategyOrders();
+  }
 }
 
 function refreshCurrent() {
@@ -29,6 +37,11 @@ function refreshCurrent() {
   if (currentTab === 'history')   loadHistory();
   if (currentTab === 'gains')     loadGains();
   if (currentTab === 'orders')    loadOrders();
+  if (currentTab === 'strategy' && _stratTicker) {
+    loadStrategySuggestions(_stratTicker);
+    loadStrategyOrders();
+    loadStrategyRecent();
+  }
 }
 
 // ── Overview (Top Tickers) ────────────────────────────────────────
@@ -199,20 +212,55 @@ async function loadCustomTickerPage(page) {
   }
 }
 
-// ── Positions ─────────────────────────────────────────────────────
-async function loadPositions() {
-  try {
-    const data = await fetch('/api/positions').then(r=>r.json());
-    document.getElementById('pos-tbody').innerHTML = data.map(p => `<tr>
+// ── Positions (sortable table) ────────────────────────────────────
+let _posData = [];
+let _posSortCol = null;
+let _posSortDir = 1;
+
+function _renderPositions() {
+  const rows = [..._posData];
+  if (_posSortCol) {
+    rows.sort((a, b) => {
+      let av = a[_posSortCol], bv = b[_posSortCol];
+      if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
+      if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
+      if (typeof av === 'string') av = av.toLowerCase();
+      if (typeof bv === 'string') bv = bv.toLowerCase();
+      return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
+    });
+  }
+  document.getElementById('pos-tbody').innerHTML = rows.map(p => {
+    const priceDecimals = p.asset_type === 'OPTION' ? 4 : 2;
+    return `<tr>
       <td><b>${esc(p.symbol)}</b></td>
       <td><span class="badge badge-${p.asset_type}">${p.asset_type}</span></td>
       <td>${fmt(p.quantity,0)}</td>
-      <td>${p.avg_price!=null?'$'+fmt(p.avg_price,4):'—'}</td>
+      <td>${p.avg_price!=null?'$'+fmt(p.avg_price,priceDecimals):'—'}</td>
+      <td>${p.current_price!=null?'$'+fmt(p.current_price,priceDecimals):'—'}</td>
       <td>${p.market_value!=null?'$'+fmt(p.market_value):'—'}</td>
       <td class="${cls(p.unrealized_pl)}">${p.unrealized_pl!=null?'$'+fmtD(p.unrealized_pl):'—'}</td>
       <td class="${cls(p.day_pl)}">${p.day_pl!=null?'$'+fmtD(p.day_pl):'—'}</td>
       <td class="${cls(p.day_pl_pct)}">${p.day_pl_pct!=null?fmtD(p.day_pl_pct)+'%':'—'}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+  // Update sort arrows
+  ['symbol','quantity','avg_price','current_price','market_value','unrealized_pl','day_pl','day_pl_pct'].forEach(col => {
+    const el = document.getElementById('pa-' + col);
+    if (el) el.textContent = col === _posSortCol ? (_posSortDir > 0 ? ' ▲' : ' ▼') : '';
+  });
+}
+
+function sortPositions(col) {
+  if (_posSortCol === col) _posSortDir *= -1;
+  else { _posSortCol = col; _posSortDir = 1; }
+  _renderPositions();
+}
+
+async function loadPositions() {
+  try {
+    const data = await fetch('/api/positions').then(r=>r.json());
+    _posData = data;
+    _renderPositions();
     document.getElementById('pos-loading').style.display='none';
     document.getElementById('pos-table').style.display='block';
   } catch(e) {
@@ -222,12 +270,124 @@ async function loadPositions() {
   }
 }
 
-// ── Quotes ────────────────────────────────────────────────────────
-async function loadQuotes() {
+// ── Quotes & Watchlists ───────────────────────────────────────────
+const wlState = { lists: [], currentId: 'positions', initialized: false };
+
+async function initWatchlists() {
+  if (wlState.initialized) { loadQuotes(); return; }
+  wlState.initialized = true;
   try {
-    const data = await fetch('/api/quotes').then(r=>r.json());
-    document.getElementById('q-tbody').innerHTML = data.map(q=>`<tr>
-      <td><b>${esc(q.symbol)}</b></td><td>$${fmt(q.last)}</td>
+    const lists = await fetch('/api/watchlists').then(r => r.json());
+    wlState.lists = lists;
+    _renderWlTabs();
+    loadQuotes();
+  } catch(e) {
+    loadQuotes();
+  }
+}
+
+function _renderWlTabs() {
+  const container = document.getElementById('wl-tabs');
+  const fixed = `<button class="wl-tab${wlState.currentId==='positions'?' active':''}" data-list="positions" onclick="selectWatchlist('positions')">All Positions</button>`;
+  const dynamic = wlState.lists.map(l =>
+    `<button class="wl-tab${wlState.currentId===l.id?' active':''}" data-list="${l.id}" onclick="selectWatchlist(${l.id})">${esc(l.name)}</button>`
+  ).join('');
+  container.innerHTML = fixed + dynamic;
+}
+
+function selectWatchlist(id) {
+  wlState.currentId = id;
+  _renderWlTabs();
+  const isCustom = id !== 'positions';
+  const editBar = document.getElementById('wl-edit-bar');
+  const removeCol = document.getElementById('q-remove-col');
+  editBar.style.display = isCustom ? 'flex' : 'none';
+  if (removeCol) removeCol.style.display = isCustom ? '' : 'none';
+  const list = wlState.lists.find(l => l.id === id);
+  document.getElementById('q-list-label').textContent =
+    isCustom && list ? `Live quotes — ${list.name}` : 'Live quotes — All Positions';
+  loadQuotes();
+}
+
+function showNewListForm() {
+  document.getElementById('wl-new-form').style.display = 'flex';
+  document.getElementById('wl-new-btn').style.display = 'none';
+  document.getElementById('wl-name-input').focus();
+}
+
+function hideNewListForm() {
+  document.getElementById('wl-new-form').style.display = 'none';
+  document.getElementById('wl-new-btn').style.display = '';
+  document.getElementById('wl-name-input').value = '';
+}
+
+async function createWatchlist() {
+  const name = document.getElementById('wl-name-input').value.trim();
+  if (!name) return;
+  try {
+    const res = await fetch('/api/watchlists', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name})
+    }).then(r => r.json());
+    if (res.error) { alert('Error: ' + res.error); return; }
+    wlState.lists.push(res);
+    hideNewListForm();
+    selectWatchlist(res.id);
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteCurrentList() {
+  const id = wlState.currentId;
+  if (id === 'positions') return;
+  const list = wlState.lists.find(l => l.id === id);
+  if (!confirm(`Delete list "${list?.name}"? This cannot be undone.`)) return;
+  try {
+    await fetch('/api/watchlists/' + id, {method: 'DELETE'});
+    wlState.lists = wlState.lists.filter(l => l.id !== id);
+    selectWatchlist('positions');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function addWatchlistSymbol() {
+  const id = wlState.currentId;
+  if (id === 'positions') return;
+  const sym = document.getElementById('wl-sym-input').value.trim().toUpperCase();
+  if (!sym) return;
+  try {
+    await fetch(`/api/watchlists/${id}/symbols`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({symbol: sym})
+    });
+    document.getElementById('wl-sym-input').value = '';
+    const list = wlState.lists.find(l => l.id === id);
+    if (list) list.symbol_count = (list.symbol_count || 0) + 1;
+    _renderWlTabs();
+    loadQuotes();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function removeWatchlistSymbol(listId, symbol) {
+  try {
+    await fetch(`/api/watchlists/${listId}/symbols/${symbol}`, {method: 'DELETE'});
+    loadQuotes();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function loadQuotes() {
+  const id = wlState.currentId;
+  document.getElementById('q-loading').style.display = 'block';
+  document.getElementById('q-table').style.display = 'none';
+  document.getElementById('q-error').style.display = 'none';
+  const isCustom = id !== 'positions';
+  const removeCol = document.getElementById('q-remove-col');
+  if (removeCol) removeCol.style.display = isCustom ? '' : 'none';
+  try {
+    const url = isCustom ? `/api/quotes/list/${id}` : '/api/quotes';
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    document.getElementById('q-tbody').innerHTML = data.map(q => `<tr>
+      <td><b>${esc(q.symbol)}</b></td>
+      <td>$${fmt(q.last)}</td>
       <td>${q.bid!=null?'$'+fmt(q.bid):'—'}</td>
       <td>${q.ask!=null?'$'+fmt(q.ask):'—'}</td>
       <td class="${cls(q.change)}">${q.change!=null?'$'+fmtD(q.change):'—'}</td>
@@ -235,6 +395,7 @@ async function loadQuotes() {
       <td>${q.volume!=null?Number(q.volume).toLocaleString():'—'}</td>
       <td>${q['52w_high']!=null?'$'+fmt(q['52w_high']):'—'}</td>
       <td>${q['52w_low']!=null?'$'+fmt(q['52w_low']):'—'}</td>
+      ${isCustom ? `<td><button class="wl-remove-sym" onclick="removeWatchlistSymbol(${id},'${esc(q.symbol)}')">✕</button></td>` : ''}
     </tr>`).join('');
     document.getElementById('q-loading').style.display='none';
     document.getElementById('q-table').style.display='table';
@@ -1768,9 +1929,744 @@ async function cancelOrder(orderId) {
   }
 }
 
+// ── Options Strategy Tab ──────────────────────────────────────────
+let stratMode = 'naked';
+let _stratTicker = '';
+let _stratChainData = null;
+let _stratPendingOrder = null;
+let _stratSuggestions = [];
+let _stratOrders = [];
+
+const STRAT_MODES = ['naked', 'vertical', 'collar', 'bundle'];
+
+function setStrategyMode(mode) {
+  stratMode = mode;
+  STRAT_MODES.forEach(m => {
+    const btn = document.getElementById('strat-btn-' + m);
+    if (btn) btn.classList.toggle('active', m === mode);
+    const sec = document.getElementById('strat-form-' + m);
+    if (sec) sec.style.display = m === mode ? '' : 'none';
+  });
+  document.getElementById('strat-result').innerHTML = '';
+  document.getElementById('strat-pnl').style.display = 'none';
+  updateStratPnl();
+}
+
+function onStrategyTickerChange() {
+  const ticker = document.getElementById('strat-ticker').value.trim().toUpperCase();
+  if (!ticker) {
+    _stratTicker = '';
+    clearPositionPanel('strat-position-panel');
+    document.getElementById('strat-suggest-cards').innerHTML =
+      '<div style="color:#475569;font-size:12px">Enter a ticker to get strategy suggestions</div>';
+    document.getElementById('strat-recent').innerHTML =
+      '<div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>';
+    document.getElementById('strat-orders').innerHTML =
+      '<div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>';
+    document.getElementById('strat-recent-count').textContent = '';
+    document.getElementById('strat-orders-count').textContent = '';
+    return;
+  }
+  const changed = ticker !== _stratTicker;
+  _stratTicker = ticker;
+  if (changed) {
+    loadStrategyExpirations(ticker);
+    loadStrategySuggestions(ticker);
+    loadPositionSummaryForTicker(ticker, 'strat-position-panel');
+    loadStrategyRecent();
+    loadStrategyOrders();
+  }
+}
+
+async function loadStrategyExpirations(ticker) {
+  const sel = document.getElementById('strat-expiry');
+  sel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const data = await fetch('/api/option-expirations/' + encodeURIComponent(ticker)).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    if (!data.expirations || !data.expirations.length) {
+      sel.innerHTML = '<option value="">No expirations found</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">Select expiration (' + data.expirations.length + ')</option>'
+      + data.expirations.map(d => '<option value="' + d + '">' + d + '</option>').join('');
+  } catch(e) {
+    sel.innerHTML = '<option value="">Error loading expirations</option>';
+  }
+}
+
+async function loadStrategyChain() {
+  const expiry = document.getElementById('strat-expiry').value;
+  const content = document.getElementById('strat-chain-content');
+  const status  = document.getElementById('strat-chain-status');
+  if (!expiry || !_stratTicker) {
+    content.innerHTML = '<div style="color:#475569;font-size:12px;padding:4px 0">Select an expiration to browse the chain</div>';
+    return;
+  }
+  status.textContent = 'Loading…';
+  content.innerHTML = '<div class="loading" style="padding:12px">Loading option chain…</div>';
+  try {
+    const data = await fetch('/api/option-chain?symbol=' + encodeURIComponent(_stratTicker) +
+      '&from_date=' + expiry + '&to_date=' + expiry + '&strike_count=20').then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    _stratChainData = data;
+
+    const calls = data.calls[expiry] || [];
+    const puts  = data.puts[expiry]  || [];
+    const strikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a - b);
+    const callMap = {}; calls.forEach(c => callMap[c.strike] = c);
+    const putMap  = {}; puts.forEach(p => putMap[p.strike] = p);
+
+    if (!strikes.length) {
+      content.innerHTML = '<div style="color:#475569;font-size:12px;padding:4px 0">No contracts found</div>';
+      status.textContent = '';
+      return;
+    }
+
+    const fo = v => v == null ? '—' : Number(v).toFixed(2);
+    const fv = v => v == null ? '—' : Number(v).toLocaleString();
+
+    const rows = strikes.map(strike => {
+      const c = callMap[strike] || {};
+      const p = putMap[strike]  || {};
+      const cI = c.itm ? ' chain-td-itm' : '';
+      const pI = p.itm ? ' chain-td-itm' : '';
+      return '<tr class="chain-row">' +
+        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.bid) + '</td>' +
+        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.ask) + '</td>' +
+        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.last) + '</td>' +
+        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fv(c.volume) + '</td>' +
+        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fv(c.oi) + '</td>' +
+        '<td class="chain-td-strike">' + fo(strike) + '</td>' +
+        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.bid) + '</td>' +
+        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.ask) + '</td>' +
+        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.last) + '</td>' +
+        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fv(p.volume) + '</td>' +
+        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fv(p.oi) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    content.innerHTML =
+      '<table class="chain-table" onclick="onStratChainClick(event)">' +
+      '<thead><tr>' +
+        '<th class="chain-th-calls" colspan="5">CALLS</th>' +
+        '<th class="chain-th-strike">STRIKE</th>' +
+        '<th class="chain-th-puts" colspan="5">PUTS</th>' +
+      '</tr><tr>' +
+        '<th class="chain-th-calls">Bid</th><th class="chain-th-calls">Ask</th><th class="chain-th-calls">Last</th>' +
+        '<th class="chain-th-calls">Vol</th><th class="chain-th-calls">OI</th>' +
+        '<th class="chain-th-strike"></th>' +
+        '<th class="chain-th-puts">Bid</th><th class="chain-th-puts">Ask</th><th class="chain-th-puts">Last</th>' +
+        '<th class="chain-th-puts">Vol</th><th class="chain-th-puts">OI</th>' +
+      '</tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>' +
+      '<div class="chain-click-hint">Click any call or put row to fill the strategy form</div>';
+    status.textContent = strikes.length + ' strikes';
+  } catch(e) {
+    content.innerHTML = '<div style="color:#f87171;font-size:12px;padding:4px 0">Error: ' + esc(e.message) + '</div>';
+    status.textContent = '';
+  }
+}
+
+function onStratChainClick(e) {
+  const td = e.target.closest('td[data-side]');
+  if (!td) return;
+  const side   = td.getAttribute('data-side');
+  const strike = parseFloat(td.getAttribute('data-strike'));
+  const expiry = document.getElementById('strat-expiry').value;
+  if (!side || !strike || !expiry || !_stratChainData) return;
+
+  const contracts = side === 'CALL' ? (_stratChainData.calls[expiry] || []) : (_stratChainData.puts[expiry] || []);
+  const contract = contracts.find(c => c.strike === strike);
+  const mid = contract && contract.bid != null && contract.ask != null
+    ? ((contract.bid + contract.ask) / 2).toFixed(2) : '';
+
+  if (stratMode === 'naked') {
+    document.getElementById('sn-type').value   = side;
+    document.getElementById('sn-strike').value = strike;
+    document.getElementById('sn-price').value  = mid;
+  } else if (stratMode === 'vertical') {
+    document.getElementById('sv-type').value = side;
+    if (!document.getElementById('sv-sell-strike').value) {
+      document.getElementById('sv-sell-strike').value = strike;
+    } else if (!document.getElementById('sv-buy-strike').value) {
+      document.getElementById('sv-buy-strike').value = strike;
+    } else {
+      document.getElementById('sv-sell-strike').value = strike;
+      document.getElementById('sv-buy-strike').value = '';
+    }
+  } else if (stratMode === 'collar') {
+    if (side === 'CALL') {
+      document.getElementById('sc-sell-type').value = 'CALL';
+      document.getElementById('sc-sell-strike').value = strike;
+    } else {
+      document.getElementById('sc-buy-type').value = 'PUT';
+      document.getElementById('sc-buy-strike').value = strike;
+    }
+  }
+  updateStratPnl();
+}
+
+// ── Suggestions ──────────────────────────────────────────────────
+async function loadStrategySuggestions(ticker) {
+  const container = document.getElementById('strat-suggest-cards');
+  container.innerHTML = '<div class="loading" style="padding:8px 0;font-size:12px">Analysing positions…</div>';
+  try {
+    const data = await fetch('/api/strategy-suggest?ticker=' + encodeURIComponent(ticker)).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+    _stratSuggestions = data.suggestions || [];
+
+    if (!_stratSuggestions.length) {
+      const posLabel = data.equity_qty > 0 ? `Long ${data.equity_qty} shares`
+                     : data.equity_qty < 0 ? `Short ${Math.abs(data.equity_qty)} shares`
+                     : 'No equity position';
+      container.innerHTML =
+        '<div style="color:#64748b;font-size:12px">' + posLabel + ' — no suggestions available. ' +
+        'The engine needs ≥100 shares for option strategies.</div>';
+      return;
+    }
+
+    const eqLabel = data.equity_qty > 0 ? `<span class="pos">Long ${data.equity_qty}</span>`
+                  : data.equity_qty < 0 ? `<span class="neg">Short ${Math.abs(data.equity_qty)}</span>`
+                  : 'No position';
+    const priceLabel = data.quote && data.quote.last != null ? ` · $${fmt(data.quote.last)}` : '';
+
+    container.innerHTML =
+      '<div style="font-size:12px;color:#94a3b8;margin-bottom:8px">' +
+        esc(ticker) + ': ' + eqLabel + priceLabel +
+      '</div>' +
+      _stratSuggestions.map((s, i) => {
+        const badgeCls = 'strat-badge-' + (s.strategy || 'naked');
+        return '<div class="strat-suggest-card" onclick="applyStrategySuggestion(' + i + ')">' +
+          '<div class="strat-suggest-card-title">' +
+            '<span class="strat-suggest-badge ' + badgeCls + '">' + esc(s.strategy) + '</span> ' +
+            esc(s.title) +
+          '</div>' +
+          '<div class="strat-suggest-card-desc">' + esc(s.description) + '</div>' +
+          '<div class="strat-suggest-card-detail">' + esc(s.detail || '') + '</div>' +
+        '</div>';
+      }).join('');
+  } catch(e) {
+    container.innerHTML = '<div style="color:#f87171;font-size:12px">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+function applyStrategySuggestion(index) {
+  const s = _stratSuggestions[index];
+  if (!s) return;
+
+  // Switch to the right mode
+  setStrategyMode(s.strategy || 'naked');
+
+  // Set expiry if legs have it
+  const legExpiry = s.legs && s.legs.length > 0 ? s.legs[0].expiry : null;
+  if (legExpiry) {
+    const sel = document.getElementById('strat-expiry');
+    if (sel) {
+      sel.value = legExpiry;
+      loadStrategyChain();
+    }
+  }
+
+  if (s.strategy === 'naked' && s.legs && s.legs.length === 1) {
+    const leg = s.legs[0];
+    document.getElementById('sn-type').value   = leg.option_type || 'CALL';
+    document.getElementById('sn-action').value = leg.instruction || 'SELL_TO_OPEN';
+    document.getElementById('sn-strike').value = leg.strike || '';
+    document.getElementById('sn-qty').value    = leg.quantity || 1;
+    document.getElementById('sn-price').value  = leg.est_premium || s.price || '';
+  } else if (s.strategy === 'vertical' && s.legs && s.legs.length === 2) {
+    const sellLeg = s.legs.find(l => l.instruction.includes('SELL'));
+    const buyLeg  = s.legs.find(l => l.instruction.includes('BUY'));
+    if (sellLeg && buyLeg) {
+      document.getElementById('sv-type').value         = sellLeg.option_type || 'CALL';
+      document.getElementById('sv-sell-strike').value   = sellLeg.strike || '';
+      document.getElementById('sv-buy-strike').value    = buyLeg.strike || '';
+      document.getElementById('sv-qty').value           = sellLeg.quantity || 1;
+      document.getElementById('sv-price').value         = s.price || '';
+      document.getElementById('sv-order-type').value    = s.order_type || 'NET_CREDIT';
+    }
+  } else if (s.strategy === 'collar' && s.legs && s.legs.length === 2) {
+    const sellLeg = s.legs.find(l => l.instruction.includes('SELL'));
+    const buyLeg  = s.legs.find(l => l.instruction.includes('BUY'));
+    if (sellLeg && buyLeg) {
+      document.getElementById('sc-sell-type').value    = sellLeg.option_type || 'CALL';
+      document.getElementById('sc-sell-strike').value  = sellLeg.strike || '';
+      document.getElementById('sc-buy-type').value     = buyLeg.option_type || 'PUT';
+      document.getElementById('sc-buy-strike').value   = buyLeg.strike || '';
+      document.getElementById('sc-qty').value          = sellLeg.quantity || 1;
+      document.getElementById('sc-price').value        = s.price || '';
+      document.getElementById('sc-order-type').value   = s.order_type || 'NET_ZERO';
+    }
+  }
+  updateStratPnl();
+  document.querySelector('.strat-forms-col').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── Strategy sidebar: recent trades ──────────────────────────────
+const stratRecentState = { page: 1 };
+
+async function loadStrategyRecent(page) {
+  const ticker = _stratTicker;
+  const container = document.getElementById('strat-recent');
+  const countDiv  = document.getElementById('strat-recent-count');
+
+  if (!ticker) {
+    container.innerHTML = '<div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>';
+    countDiv.textContent = '';
+    return;
+  }
+
+  if (page !== undefined) stratRecentState.page = page;
+  else stratRecentState.page = 1;
+
+  container.innerHTML = '<div class="loading" style="padding:8px">Loading…</div>';
+
+  try {
+    const params = new URLSearchParams({ ticker, category: 'option', limit: 15, page: stratRecentState.page });
+    const res = await fetch('/api/transactions?' + params).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+
+    countDiv.textContent = res.total.toLocaleString() + ' option trades';
+
+    if (!res.data.length) {
+      container.innerHTML = '<div style="color:#475569;font-size:12px">No option trades for ' + esc(ticker) + '</div>';
+      return;
+    }
+
+    const rows = res.data.map(r => {
+      const isBuy = (r.action||'').toLowerCase().includes('buy');
+      const optBadge = r.option_type
+        ? '<span class="badge badge-' + r.option_type + '" style="font-size:10px;padding:1px 5px">' + r.option_type + '</span>'
+        : '';
+      return '<tr>' +
+        '<td style="color:#64748b">' + r.trade_date + '</td>' +
+        '<td class="' + (isBuy ? 'pos' : 'neg') + '">' + esc(r.action) + '</td>' +
+        '<td>' + (r.quantity != null ? fmt(r.quantity, 0) : '—') + '</td>' +
+        '<td>' + (r.price != null ? '$' + fmt(r.price, 4) : '—') + '</td>' +
+        '<td>' + optBadge + '</td>' +
+        '<td>' + (r.option_strike != null ? '$' + fmt(r.option_strike) : '') + '</td>' +
+        '<td style="color:#64748b">' + (r.option_expiry || '') + '</td>' +
+      '</tr>';
+    }).join('');
+
+    const cur = stratRecentState.page, tp = res.pages;
+    const pagination = tp > 1
+      ? '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:4px">' +
+          '<button class="pg-btn" ' + (cur <= 1 ? 'disabled' : '') + ' onclick="loadStrategyRecent(' + (cur-1) + ')">‹</button>' +
+          '<span class="pg-info">Page ' + cur + '/' + tp + '</span>' +
+          '<button class="pg-btn" ' + (cur >= tp ? 'disabled' : '') + ' onclick="loadStrategyRecent(' + (cur+1) + ')">›</button>' +
+        '</div>'
+      : '';
+
+    container.innerHTML =
+      '<table><thead><tr>' +
+      '<th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Type</th><th>Strike</th><th>Expiry</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table>' + pagination;
+  } catch(e) {
+    container.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+// ── Strategy sidebar: open orders ────────────────────────────────
+async function loadStrategyOrders() {
+  const ticker = _stratTicker;
+  const container   = document.getElementById('strat-orders');
+  const countDiv    = document.getElementById('strat-orders-count');
+  const cancelBtn   = document.getElementById('strat-cancel-all-btn');
+
+  if (!ticker) {
+    container.innerHTML = '<div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>';
+    countDiv.textContent = '';
+    cancelBtn.style.display = 'none';
+    _stratOrders = [];
+    return;
+  }
+
+  container.innerHTML = '<div class="loading" style="padding:6px">Loading…</div>';
+  countDiv.textContent = '';
+  cancelBtn.style.display = 'none';
+
+  try {
+    const raw = await fetch('/api/orders').then(r => r.json());
+    if (raw.error) throw new Error(raw.error);
+
+    const orders = raw.filter(o =>
+      o.underlying === ticker || o.symbol === ticker || o.underlying.startsWith(ticker));
+    _stratOrders = orders;
+
+    countDiv.textContent = orders.length + ' open order' + (orders.length !== 1 ? 's' : '');
+
+    if (!orders.length) {
+      container.innerHTML = '<div style="color:#475569;font-size:12px">No open orders for ' + esc(ticker) + '</div>';
+      return;
+    }
+
+    cancelBtn.style.display = '';
+
+    const rows = orders.map(o => {
+      const sc = (o.instruction || '').includes('SELL') ? 'neg' : 'pos';
+      const p = o.price != null ? '$' + fmt(o.price, 2)
+              : o.stop_price != null ? 'Stp $' + fmt(o.stop_price) : '—';
+      const cancelHtml = o.cancelable
+        ? '<button class="cancel-single-btn" onclick="cancelStratOrder(\'' + esc(o.order_id) + '\')">✕</button>'
+        : '';
+      return '<tr>' +
+        '<td><span class="' + sc + '">' + esc(o.instruction) + '</span></td>' +
+        '<td>' + fmt(o.quantity, 0) + '</td>' +
+        '<td>' + p + '</td>' +
+        '<td><span class="badge badge-status-' + o.status + '" style="font-size:9px;padding:1px 5px">' + o.status + '</span></td>' +
+        '<td>' + cancelHtml + '</td>' +
+      '</tr>';
+    }).join('');
+
+    container.innerHTML =
+      '<table><thead><tr><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th></th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>';
+  } catch(e) {
+    container.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function cancelStratOrder(orderId) {
+  if (!confirm('Cancel order ' + orderId + '?')) return;
+  try {
+    const res = await fetch('/api/order/' + orderId, { method: 'DELETE' }).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+    ordersState.loaded = false;
+    await loadStrategyOrders();
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function cancelAllStratOrders() {
+  const cancelable = _stratOrders.filter(o => o.cancelable);
+  if (!cancelable.length) { alert('No cancelable orders.'); return; }
+  if (!confirm('Cancel ALL ' + cancelable.length + ' open orders for ' + _stratTicker + '?')) return;
+
+  const container = document.getElementById('strat-orders');
+  container.innerHTML = '<div class="loading" style="padding:6px">Cancelling…</div>';
+
+  let ok = 0, fail = 0;
+  for (const o of cancelable) {
+    try {
+      await fetch('/api/order/' + o.order_id, { method: 'DELETE' }).then(r => r.json());
+      ok++;
+    } catch { fail++; }
+  }
+  ordersState.loaded = false;
+  container.innerHTML = fail === 0
+    ? '<div style="color:#86efac;font-size:12px;padding:4px 0">All ' + ok + ' cancelled.</div>'
+    : '<div class="error" style="font-size:12px">' + ok + ' cancelled, ' + fail + ' failed.</div>';
+  setTimeout(() => loadStrategyOrders(), 1500);
+}
+
+// ── P&L preview ──────────────────────────────────────────────────
+function updateStratPnl() {
+  const box = document.getElementById('strat-pnl');
+  let info = null;
+
+  try {
+    if (stratMode === 'naked') {
+      info = _calcNakedPnl();
+    } else if (stratMode === 'vertical') {
+      info = _calcVerticalPnl();
+    } else if (stratMode === 'collar') {
+      info = _calcCollarPnl();
+    } else if (stratMode === 'bundle') {
+      info = null;
+    }
+  } catch(e) { info = null; }
+
+  if (!info) {
+    box.style.display = 'none';
+    return;
+  }
+
+  box.style.display = '';
+  const items = Object.entries(info).map(([k, v]) => {
+    const label = k.replace(/_/g, ' ');
+    let valCls = '';
+    if (typeof v === 'number') {
+      if (k.includes('profit') || k.includes('credit')) valCls = v >= 0 ? 'pos' : 'neg';
+      if (k.includes('loss')) valCls = 'neg';
+    }
+    const display = typeof v === 'number' ? '$' + fmt(v) : (v || '—');
+    return '<div class="strat-pnl-item"><label>' + esc(label) + '</label><div class="val ' + valCls + '">' + display + '</div></div>';
+  }).join('');
+
+  box.innerHTML = '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;font-weight:600">P&L Preview</div>' +
+    '<div class="strat-pnl-grid">' + items + '</div>';
+}
+
+function _calcNakedPnl() {
+  const strike = parseFloat(document.getElementById('sn-strike').value);
+  const price  = parseFloat(document.getElementById('sn-price').value);
+  const qty    = parseInt(document.getElementById('sn-qty').value) || 1;
+  const type   = document.getElementById('sn-type').value;
+  const action = document.getElementById('sn-action').value;
+  if (!strike || !price) return null;
+
+  const isSell = action.includes('SELL');
+  const total  = price * qty * 100;
+
+  if (isSell && type === 'CALL') {
+    return {
+      net_credit: total,
+      max_profit: total,
+      max_loss: 'Unlimited',
+      breakeven: round2(strike + price),
+    };
+  } else if (isSell && type === 'PUT') {
+    return {
+      net_credit: total,
+      max_profit: total,
+      max_loss: round2((strike - price) * qty * 100),
+      breakeven: round2(strike - price),
+    };
+  } else if (!isSell && type === 'CALL') {
+    return {
+      net_debit: total,
+      max_profit: 'Unlimited',
+      max_loss: total,
+      breakeven: round2(strike + price),
+    };
+  } else {
+    return {
+      net_debit: total,
+      max_profit: round2((strike - price) * qty * 100),
+      max_loss: total,
+      breakeven: round2(strike - price),
+    };
+  }
+}
+
+function _calcVerticalPnl() {
+  const sellStrike = parseFloat(document.getElementById('sv-sell-strike').value);
+  const buyStrike  = parseFloat(document.getElementById('sv-buy-strike').value);
+  const netPrice   = parseFloat(document.getElementById('sv-price').value);
+  const qty        = parseInt(document.getElementById('sv-qty').value) || 1;
+  const orderType  = document.getElementById('sv-order-type').value;
+  if (!sellStrike || !buyStrike || !netPrice) return null;
+
+  const width   = Math.abs(buyStrike - sellStrike);
+  const isCredit = orderType === 'NET_CREDIT';
+  const total    = netPrice * qty * 100;
+
+  if (isCredit) {
+    return {
+      net_credit: total,
+      max_profit: total,
+      max_loss:   round2((width - netPrice) * qty * 100),
+      breakeven:  round2(sellStrike + (sellStrike < buyStrike ? netPrice : -netPrice)),
+    };
+  } else {
+    return {
+      net_debit:  total,
+      max_profit: round2((width - netPrice) * qty * 100),
+      max_loss:   total,
+      breakeven:  round2(buyStrike - (buyStrike < sellStrike ? netPrice : -netPrice)),
+    };
+  }
+}
+
+function _calcCollarPnl() {
+  const sellStrike = parseFloat(document.getElementById('sc-sell-strike').value);
+  const buyStrike  = parseFloat(document.getElementById('sc-buy-strike').value);
+  const netPrice   = parseFloat(document.getElementById('sc-price').value) || 0;
+  const qty        = parseInt(document.getElementById('sc-qty').value) || 1;
+  const orderType  = document.getElementById('sc-order-type').value;
+  if (!sellStrike || !buyStrike) return null;
+
+  const total = netPrice * qty * 100;
+  const isCredit = orderType === 'NET_CREDIT';
+
+  return {
+    [isCredit ? 'net_credit' : (orderType === 'NET_ZERO' ? 'net_cost' : 'net_debit')]:
+      orderType === 'NET_ZERO' ? 0 : total,
+    protection_floor: Math.min(sellStrike, buyStrike),
+    cap_ceiling: Math.max(sellStrike, buyStrike),
+  };
+}
+
+function round2(v) { return Math.round(v * 100) / 100; }
+
+// ── Strategy preview & submit ────────────────────────────────────
+function _buildStrategyPayload() {
+  const ticker   = _stratTicker;
+  const expiry   = document.getElementById('strat-expiry').value;
+  const duration = document.getElementById('strat-duration').value;
+  const session  = document.getElementById('strat-session').value;
+
+  if (!ticker)  throw new Error('Ticker is required');
+  if (!expiry)  throw new Error('Expiration is required');
+
+  const OP = (type, strike) => {
+    const m = expiry.split('-');
+    const sym = ticker.padEnd(6) +
+      m[0].slice(2) + m[1] + m[2] +
+      type[0] +
+      String(Math.round(strike * 1000)).padStart(8, '0');
+    return sym;
+  };
+
+  let legs = [], orderType, price, strategy, summary;
+
+  if (stratMode === 'naked') {
+    const optType  = document.getElementById('sn-type').value;
+    const action   = document.getElementById('sn-action').value;
+    const strike   = parseFloat(document.getElementById('sn-strike').value);
+    const qty      = parseInt(document.getElementById('sn-qty').value) || 1;
+    price          = parseFloat(document.getElementById('sn-price').value);
+    if (!strike || strike <= 0) throw new Error('Strike is required');
+    if (!price || price <= 0)   throw new Error('Limit price is required');
+
+    const chain  = _findChainContract(optType, strike, expiry);
+    const symbol = chain ? chain.symbol : OP(optType, strike);
+
+    legs = [{ type: 'option', instruction: action, symbol, quantity: qty }];
+    orderType = 'LIMIT';
+    strategy  = 'naked';
+
+    const aLabel = { SELL_TO_OPEN: 'Sell to Open', BUY_TO_OPEN: 'Buy to Open',
+                     BUY_TO_CLOSE: 'Buy to Close', SELL_TO_CLOSE: 'Sell to Close' }[action];
+    const badge  = optType === 'PUT' ? '<span class="badge badge-PUT">PUT</span>' : '<span class="badge badge-CALL">CALL</span>';
+    summary = `<b>${aLabel}</b> ${qty} ${badge} @ $${strike} — ${expiry}<br>Limit: $${price}/sh ($${(price * 100).toFixed(0)}/contract)`;
+
+  } else if (stratMode === 'vertical') {
+    const optType    = document.getElementById('sv-type').value;
+    const sellStrike = parseFloat(document.getElementById('sv-sell-strike').value);
+    const buyStrike  = parseFloat(document.getElementById('sv-buy-strike').value);
+    const qty        = parseInt(document.getElementById('sv-qty').value) || 1;
+    price            = parseFloat(document.getElementById('sv-price').value);
+    orderType        = document.getElementById('sv-order-type').value;
+    if (!sellStrike || !buyStrike) throw new Error('Both strikes are required');
+    if (!price && orderType !== 'NET_ZERO') throw new Error('Price is required');
+
+    const sellSym = (_findChainContract(optType, sellStrike, expiry) || {}).symbol || OP(optType, sellStrike);
+    const buySym  = (_findChainContract(optType, buyStrike, expiry) || {}).symbol || OP(optType, buyStrike);
+
+    legs = [
+      { type: 'option', instruction: 'SELL_TO_OPEN', symbol: sellSym, quantity: qty },
+      { type: 'option', instruction: 'BUY_TO_OPEN',  symbol: buySym,  quantity: qty },
+    ];
+    strategy = 'vertical';
+    const badge = optType === 'PUT' ? '<span class="badge badge-PUT">PUT</span>' : '<span class="badge badge-CALL">CALL</span>';
+    summary = `<b>Vertical ${badge} Spread</b> — Sell $${sellStrike} / Buy $${buyStrike} × ${qty}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price || 0}`;
+
+  } else if (stratMode === 'collar') {
+    const sellType   = document.getElementById('sc-sell-type').value;
+    const sellStrike = parseFloat(document.getElementById('sc-sell-strike').value);
+    const buyType    = document.getElementById('sc-buy-type').value;
+    const buyStrike  = parseFloat(document.getElementById('sc-buy-strike').value);
+    const qty        = parseInt(document.getElementById('sc-qty').value) || 1;
+    price            = parseFloat(document.getElementById('sc-price').value) || 0;
+    orderType        = document.getElementById('sc-order-type').value;
+    if (!sellStrike || !buyStrike) throw new Error('Both strikes are required');
+
+    const sellSym = (_findChainContract(sellType, sellStrike, expiry) || {}).symbol || OP(sellType, sellStrike);
+    const buySym  = (_findChainContract(buyType, buyStrike, expiry) || {}).symbol || OP(buyType, buyStrike);
+
+    legs = [
+      { type: 'option', instruction: 'SELL_TO_OPEN', symbol: sellSym, quantity: qty },
+      { type: 'option', instruction: 'BUY_TO_OPEN',  symbol: buySym,  quantity: qty },
+    ];
+    strategy = 'collar';
+    summary = `<b>Collar</b> — Sell ${sellType} $${sellStrike} + Buy ${buyType} $${buyStrike} × ${qty}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price}`;
+
+  } else if (stratMode === 'bundle') {
+    const eqAction = document.getElementById('sb-eq-action').value;
+    const eqQty    = parseInt(document.getElementById('sb-eq-qty').value);
+    const optType  = document.getElementById('sb-opt-type').value;
+    const optAction = document.getElementById('sb-opt-action').value;
+    const strike    = parseFloat(document.getElementById('sb-strike').value);
+    const optQty    = parseInt(document.getElementById('sb-opt-qty').value) || 1;
+    price           = parseFloat(document.getElementById('sb-price').value) || 0;
+    orderType       = document.getElementById('sb-order-type').value;
+
+    if (!eqQty || eqQty <= 0)  throw new Error('Equity quantity is required');
+    if (!strike || strike <= 0) throw new Error('Strike is required');
+
+    const optSym = (_findChainContract(optType, strike, expiry) || {}).symbol || OP(optType, strike);
+
+    legs = [
+      { type: 'equity', instruction: eqAction, symbol: ticker, quantity: eqQty },
+      { type: 'option', instruction: optAction, symbol: optSym, quantity: optQty },
+    ];
+    strategy = 'bundle';
+
+    const eqLabel = { BUY:'Buy', SELL:'Sell', SELL_SHORT:'Sell Short', BUY_TO_COVER:'Buy to Cover' }[eqAction];
+    const optLabel = { SELL_TO_OPEN:'STO', BUY_TO_OPEN:'BTO' }[optAction];
+    summary = `<b>Bundle</b> — ${eqLabel} ${eqQty} shares + ${optLabel} ${optQty} ${optType} $${strike}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price}`;
+
+  } else {
+    throw new Error('Unknown strategy mode');
+  }
+
+  return { strategy, legs, order_type: orderType, price: orderType === 'NET_ZERO' ? undefined : price,
+           duration, session, _summary: summary };
+}
+
+function _findChainContract(type, strike, expiry) {
+  if (!_stratChainData) return null;
+  const map = type === 'CALL' ? _stratChainData.calls : _stratChainData.puts;
+  const contracts = map ? (map[expiry] || []) : [];
+  return contracts.find(c => c.strike === strike) || null;
+}
+
+function previewStrategy() {
+  const resultDiv = document.getElementById('strat-result');
+  try {
+    const payload = _buildStrategyPayload();
+    _stratPendingOrder = payload;
+
+    const durLabel = document.getElementById('strat-duration').value === 'gtc' ? 'GTC' : 'Day';
+    const sesLabel = {normal:'Normal', seamless:'Extended Hrs'}[document.getElementById('strat-session').value] || 'Normal';
+
+    resultDiv.innerHTML =
+      '<div class="preview-box">' +
+        '<div class="preview-title">Review Strategy Order</div>' +
+        '<div class="preview-summary">' + payload._summary + '<br>' + durLabel + ' · ' + sesLabel + '</div>' +
+        '<div style="font-size:11px;color:#64748b;margin-bottom:14px">Verify all details before confirming.</div>' +
+        '<div class="preview-actions">' +
+          '<button class="cancel-btn" onclick="document.getElementById(\'strat-result\').innerHTML=\'\'">Cancel</button>' +
+          '<button class="confirm-btn" onclick="submitStrategy()">Confirm &amp; Submit</button>' +
+        '</div>' +
+      '</div>';
+  } catch(e) {
+    resultDiv.innerHTML = '<div class="error" style="margin-top:12px;padding:10px 14px;border-radius:6px">' + esc(e.message) + '</div>';
+  }
+}
+
+async function submitStrategy() {
+  if (!_stratPendingOrder) return;
+  const payload = _stratPendingOrder;
+  _stratPendingOrder = null;
+  const div = document.getElementById('strat-result');
+  div.innerHTML = '<div class="loading">Submitting strategy order…</div>';
+  try {
+    const body = { ...payload };
+    delete body._summary;
+    const res = await fetch('/api/order/strategy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(r => r.json());
+
+    if (res.error) throw new Error(res.error);
+    div.innerHTML =
+      '<div class="success-box">Strategy order submitted!<br>' +
+      '<b>Order ID: ' + esc(res.order_id) + '</b><br>' +
+      '<small style="color:#6ee7b7;opacity:0.7">Check "Open Orders" to track.</small></div>';
+    ordersState.loaded = false;
+    setTimeout(() => loadStrategyOrders(), 1000);
+  } catch(e) {
+    div.innerHTML = '<div class="error" style="margin-top:0">Order failed: ' + esc(e.message) + '</div>';
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────
 document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-loadOverview();
 loadPositions();
-loadQuotes();
+loadOverview();
+initWatchlists();
 renderRungs();

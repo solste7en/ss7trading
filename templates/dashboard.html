@@ -17,31 +17,50 @@
 </div>
 
 <div class="tabs">
-  <div class="tab active"  onclick="switchTab('overview')">Overview</div>
-  <div class="tab"         onclick="switchTab('positions')">Positions</div>
-  <div class="tab"         onclick="switchTab('quotes')">Quote Lookup</div>
-  <div class="tab"         onclick="switchTab('history')">Trade History</div>
-  <div class="tab"         onclick="switchTab('gains')">Realized G/L</div>
-  <div class="tab"         onclick="switchTab('trade')">⚡ Trade</div>
-  <div class="tab"         onclick="switchTab('ladder')">🪜 Ladder</div>
-  <div class="tab"         onclick="switchTab('orders')">Open Orders</div>
+  <div class="tab-group">
+    <span class="tab-group-label">Insight</span>
+    <div class="tab active" onclick="switchTab('positions')">Positions</div>
+    <div class="tab"        onclick="switchTab('overview')">Spotlight</div>
+    <div class="tab"        onclick="switchTab('quotes')">Quote</div>
+  </div>
+  <div class="tab-group-sep"></div>
+  <div class="tab-group">
+    <span class="tab-group-label">Trade</span>
+    <div class="tab"        onclick="switchTab('trade')">⚡ Trade</div>
+    <div class="tab"        onclick="switchTab('ladder')">🪜 Ladder</div>
+    <div class="tab"        onclick="switchTab('strategy')">Income</div>
+    <div class="tab"        onclick="switchTab('orders')">Open Orders</div>
+  </div>
+  <div class="tab-group-sep"></div>
+  <div class="tab-group">
+    <span class="tab-group-label">Records</span>
+    <div class="tab"        onclick="switchTab('history')">Trade History</div>
+    <div class="tab"        onclick="switchTab('gains')">Realized G/L</div>
+  </div>
 </div>
 
 <!-- ── Overview (Top Tickers) ── -->
-<div class="panel active" id="tab-overview">
+<div class="panel" id="tab-overview">
   <div id="overview-content">
     <div class="loading">Loading top tickers…</div>
   </div>
 </div>
 
 <!-- ── Positions ── -->
-<div class="panel" id="tab-positions">
+<div class="panel active" id="tab-positions">
   <div class="loading" id="pos-loading">Loading positions…</div>
   <div id="pos-error" class="error" style="display:none"></div>
   <div class="table-wrap" id="pos-table" style="display:none">
-    <table><thead><tr>
-      <th>Symbol</th><th>Type</th><th>Qty</th><th>Avg Price</th>
-      <th>Mkt Value</th><th>Unrealized P&L</th><th>Day P&L</th><th>Day %</th>
+    <table id="pos-tbl"><thead><tr>
+      <th class="sortable" onclick="sortPositions('symbol')">Symbol <span class="sort-arrow" id="pa-symbol"></span></th>
+      <th>Type</th>
+      <th class="sortable" onclick="sortPositions('quantity')">Qty <span class="sort-arrow" id="pa-quantity"></span></th>
+      <th class="sortable" onclick="sortPositions('avg_price')">Avg Price <span class="sort-arrow" id="pa-avg_price"></span></th>
+      <th class="sortable" onclick="sortPositions('current_price')">Mkt Price <span class="sort-arrow" id="pa-current_price"></span></th>
+      <th class="sortable" onclick="sortPositions('market_value')">Mkt Value <span class="sort-arrow" id="pa-market_value"></span></th>
+      <th class="sortable" onclick="sortPositions('unrealized_pl')">Unrealized P&amp;L <span class="sort-arrow" id="pa-unrealized_pl"></span></th>
+      <th class="sortable" onclick="sortPositions('day_pl')">Day P&amp;L <span class="sort-arrow" id="pa-day_pl"></span></th>
+      <th class="sortable" onclick="sortPositions('day_pl_pct')">Day % <span class="sort-arrow" id="pa-day_pl_pct"></span></th>
     </tr></thead><tbody id="pos-tbody"></tbody></table>
   </div>
 </div>
@@ -55,13 +74,39 @@
   </div>
   <div id="quote-result"></div>
   <hr style="border-color:#1e2235; margin:20px 0">
-  <div style="color:#64748b;font-size:12px;margin-bottom:12px;">Live quotes for all held positions:</div>
+
+  <!-- Watchlist toolbar -->
+  <div class="wl-bar">
+    <div class="wl-tabs" id="wl-tabs">
+      <button class="wl-tab active" data-list="positions" onclick="selectWatchlist('positions')">All Positions</button>
+    </div>
+    <div class="wl-actions">
+      <div id="wl-new-form" style="display:none" class="wl-new-form">
+        <input type="text" id="wl-name-input" placeholder="List name…" maxlength="40"
+               onkeydown="if(event.key==='Enter') createWatchlist(); if(event.key==='Escape') hideNewListForm()">
+        <button class="wl-confirm-btn" onclick="createWatchlist()">Create</button>
+        <button class="wl-cancel-btn" onclick="hideNewListForm()">Cancel</button>
+      </div>
+      <button class="wl-new-btn" id="wl-new-btn" onclick="showNewListForm()">+ New List</button>
+    </div>
+  </div>
+
+  <!-- Edit bar for custom lists -->
+  <div id="wl-edit-bar" style="display:none" class="wl-edit-bar">
+    <input type="text" id="wl-sym-input" placeholder="Add symbol…" maxlength="20"
+           onkeydown="if(event.key==='Enter') addWatchlistSymbol()">
+    <button class="wl-confirm-btn" onclick="addWatchlistSymbol()">Add</button>
+    <button class="wl-delete-btn" onclick="deleteCurrentList()">Delete List</button>
+  </div>
+
+  <div class="wl-label" id="q-list-label">Live quotes — All Positions</div>
   <div class="loading" id="q-loading">Loading quotes…</div>
   <div id="q-error" class="error" style="display:none"></div>
   <div class="table-wrap">
     <table style="display:none" id="q-table"><thead><tr>
       <th>Symbol</th><th>Last</th><th>Bid</th><th>Ask</th>
       <th>Change</th><th>Change %</th><th>Volume</th><th>52W High</th><th>52W Low</th>
+      <th id="q-remove-col" style="display:none"></th>
     </tr></thead><tbody id="q-tbody"></tbody></table>
   </div>
 </div>
@@ -453,6 +498,266 @@
       <div class="ladder-sidebar-table-wrap">
         <div id="lad-orders">
           <div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Options Strategy ── -->
+<div class="panel" id="tab-strategy">
+  <div class="strat-layout">
+    <!-- LEFT: strategy forms -->
+    <div class="strat-forms-col">
+      <div class="strat-toggle">
+        <button class="toggle-btn active" id="strat-btn-naked"    onclick="setStrategyMode('naked')">Naked Option</button>
+        <button class="toggle-btn"        id="strat-btn-vertical" onclick="setStrategyMode('vertical')">Spread</button>
+        <button class="toggle-btn"        id="strat-btn-collar"   onclick="setStrategyMode('collar')">Collar</button>
+        <button class="toggle-btn"        id="strat-btn-bundle"   onclick="setStrategyMode('bundle')">Equity + Option</button>
+      </div>
+
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="form-group">
+          <label>Ticker</label>
+          <input type="text" id="strat-ticker" placeholder="NVDA" maxlength="10"
+                 onchange="onStrategyTickerChange()"
+                 onkeydown="if(event.key==='Enter') onStrategyTickerChange()">
+        </div>
+        <div class="form-group">
+          <label>Expiration</label>
+          <select id="strat-expiry" onchange="loadStrategyChain()">
+            <option value="">— enter ticker first —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Duration</label>
+          <select id="strat-duration">
+            <option value="gtc">GTC (Good Till Cancelled)</option>
+            <option value="day">Day</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Session</label>
+          <select id="strat-session">
+            <option value="normal">Normal (Market Hours)</option>
+            <option value="seamless">Extended Hours</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- ── Naked Option form ── -->
+      <div id="strat-form-naked" class="strat-form-section">
+        <div class="strat-form-title">Naked Option (Single Leg)</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="sn-type"><option value="PUT">PUT</option><option value="CALL">CALL</option></select>
+          </div>
+          <div class="form-group">
+            <label>Action</label>
+            <select id="sn-action">
+              <option value="SELL_TO_OPEN">Sell to Open</option>
+              <option value="BUY_TO_OPEN">Buy to Open</option>
+              <option value="BUY_TO_CLOSE">Buy to Close</option>
+              <option value="SELL_TO_CLOSE">Sell to Close</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Strike</label>
+            <input type="number" id="sn-strike" step="0.50" min="0" placeholder="170.00" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Contracts</label>
+            <input type="number" id="sn-qty" min="1" step="1" value="1" placeholder="1" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Limit Price (per share)</label>
+            <input type="number" id="sn-price" step="0.01" min="0" placeholder="0.50" oninput="updateStratPnl()">
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Vertical Spread form ── -->
+      <div id="strat-form-vertical" class="strat-form-section" style="display:none">
+        <div class="strat-form-title">Vertical Spread (2 Legs)</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="sv-type"><option value="CALL">CALL Spread</option><option value="PUT">PUT Spread</option></select>
+          </div>
+          <div class="form-group">
+            <label>Sell Strike</label>
+            <input type="number" id="sv-sell-strike" step="0.50" min="0" placeholder="Sell leg" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Buy Strike</label>
+            <input type="number" id="sv-buy-strike" step="0.50" min="0" placeholder="Buy leg" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Contracts (each leg)</label>
+            <input type="number" id="sv-qty" min="1" step="1" value="1" placeholder="1" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Net Credit/Debit</label>
+            <input type="number" id="sv-price" step="0.01" min="0" placeholder="0.50" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Order Type</label>
+            <select id="sv-order-type">
+              <option value="NET_CREDIT">Net Credit</option>
+              <option value="NET_DEBIT">Net Debit</option>
+              <option value="NET_ZERO">Net Zero</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Collar form ── -->
+      <div id="strat-form-collar" class="strat-form-section" style="display:none">
+        <div class="strat-form-title">Collar (Sell Option + Buy Opposite)</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Sell Leg Type</label>
+            <select id="sc-sell-type"><option value="CALL">CALL</option><option value="PUT">PUT</option></select>
+          </div>
+          <div class="form-group">
+            <label>Sell Strike</label>
+            <input type="number" id="sc-sell-strike" step="0.50" min="0" placeholder="Sell leg" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Buy Leg Type</label>
+            <select id="sc-buy-type"><option value="PUT">PUT</option><option value="CALL">CALL</option></select>
+          </div>
+          <div class="form-group">
+            <label>Buy Strike</label>
+            <input type="number" id="sc-buy-strike" step="0.50" min="0" placeholder="Buy leg" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Contracts (each leg)</label>
+            <input type="number" id="sc-qty" min="1" step="1" value="1" placeholder="1" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Net Credit/Debit</label>
+            <input type="number" id="sc-price" step="0.01" min="0" placeholder="0.00" oninput="updateStratPnl()">
+          </div>
+          <div class="form-group">
+            <label>Order Type</label>
+            <select id="sc-order-type">
+              <option value="NET_ZERO">Net Zero</option>
+              <option value="NET_CREDIT">Net Credit</option>
+              <option value="NET_DEBIT">Net Debit</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Equity + Option Bundle form ── -->
+      <div id="strat-form-bundle" class="strat-form-section" style="display:none">
+        <div class="strat-form-title">Equity + Option Bundle</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Equity Action</label>
+            <select id="sb-eq-action">
+              <option value="SELL">Sell</option>
+              <option value="BUY">Buy</option>
+              <option value="SELL_SHORT">Sell Short</option>
+              <option value="BUY_TO_COVER">Buy to Cover</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Equity Qty (shares)</label>
+            <input type="number" id="sb-eq-qty" min="1" step="1" placeholder="100">
+          </div>
+          <div class="form-group">
+            <label>Option Type</label>
+            <select id="sb-opt-type"><option value="PUT">PUT</option><option value="CALL">CALL</option></select>
+          </div>
+          <div class="form-group">
+            <label>Option Action</label>
+            <select id="sb-opt-action">
+              <option value="SELL_TO_OPEN">Sell to Open</option>
+              <option value="BUY_TO_OPEN">Buy to Open</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Strike</label>
+            <input type="number" id="sb-strike" step="0.50" min="0" placeholder="170.00">
+          </div>
+          <div class="form-group">
+            <label>Contracts</label>
+            <input type="number" id="sb-opt-qty" min="1" step="1" value="1" placeholder="1">
+          </div>
+          <div class="form-group">
+            <label>Net Price</label>
+            <input type="number" id="sb-price" step="0.01" placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>Order Type</label>
+            <select id="sb-order-type">
+              <option value="NET_CREDIT">Net Credit</option>
+              <option value="NET_DEBIT">Net Debit</option>
+              <option value="MARKET">Market</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- P&L Preview panel -->
+      <div id="strat-pnl" class="strat-pnl-box" style="display:none"></div>
+
+      <button class="preview-btn" onclick="previewStrategy()" style="margin-top:14px">Preview Strategy →</button>
+      <div id="strat-result"></div>
+
+      <!-- Option chain for strategy -->
+      <div id="strat-chain-wrap" style="margin-top:14px">
+        <div class="trade-chain-header">
+          <h3>Option Chain</h3>
+          <span id="strat-chain-status" style="font-size:11px;color:#64748b"></span>
+        </div>
+        <div id="strat-chain-content" class="table-wrap" style="color:#475569;font-size:12px;padding:4px 0">
+          Enter a ticker and select an expiration to browse the chain
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: sidebar -->
+    <div class="strat-sidebar">
+      <!-- Suggestions panel -->
+      <div id="strat-suggest-panel" class="strat-suggest-panel">
+        <div class="strat-suggest-header">Suggestions</div>
+        <div id="strat-suggest-cards">
+          <div style="color:#475569;font-size:12px">Enter a ticker to get strategy suggestions</div>
+        </div>
+      </div>
+
+      <!-- Position summary -->
+      <div id="strat-position-panel" class="pos-sum-panel" style="display:none"></div>
+
+      <!-- Recent option trades -->
+      <div class="strat-sidebar-section">
+        <div class="ladder-sidebar-header">
+          <h3>Recent Option Trades</h3>
+        </div>
+        <div class="ladder-sidebar-count" id="strat-recent-count"></div>
+        <div class="ladder-sidebar-table-wrap">
+          <div id="strat-recent">
+            <div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Open orders -->
+      <div class="strat-sidebar-section" style="margin-top:14px">
+        <div class="ladder-sidebar-header">
+          <h3>Open Orders</h3>
+          <button class="cancel-all-btn" id="strat-cancel-all-btn" style="display:none"
+                  onclick="cancelAllStratOrders()">Cancel All</button>
+        </div>
+        <div class="ladder-sidebar-count" id="strat-orders-count"></div>
+        <div class="ladder-sidebar-table-wrap">
+          <div id="strat-orders">
+            <div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>
+          </div>
         </div>
       </div>
     </div>
