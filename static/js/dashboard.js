@@ -1099,9 +1099,13 @@ async function loadLadderSuggest() {
       const priceLine = refPrice != null
         ? `<div style="margin-bottom:4px;font-size:12px">${priceSource} price: <span class="strat-highlight" style="font-size:14px;font-weight:700">$${fmt(refPrice)}</span></div>`
         : '';
-      const streakLabel = data.streak_count
-        ? `${data.streak_count} consecutive <span class="strat-highlight">${esc(data.direction || '?')}</span> trades`
+      let streakLabel = data.streak_count
+        ? `${data.streak_count} <span class="strat-highlight">${esc(data.direction || '?')}</span> trades`
         : 'No accumulation streak';
+      if (data.exit_trades && data.exit_trades.length > 0) {
+        const exitQty = data.exit_trades.reduce((s, e) => s + e.qty, 0);
+        streakLabel += ` (${data.exit_trades.length} partial unwind, ${fmt(exitQty, 0)} shares)`;
+      }
       banner.innerHTML = priceLine + `<div class="ladder-strategy-banner strat-dim">${streakLabel}`
         + (data.note ? ` — ${esc(data.note)}` : '') + '</div>';
       return;
@@ -1165,13 +1169,37 @@ async function loadLadderSuggest() {
 
     const shouldAutoApply = immediateCount === 0;
 
+    // --- partial unwind note ------------------------------------------------
+    let exitNote = '';
+    if (data.exit_trades && data.exit_trades.length > 0) {
+      const exitQty = data.exit_trades.reduce((s, e) => s + e.qty, 0);
+      const exitCost = data.exit_trades.reduce((s, e) => s + e.qty * e.price, 0);
+      const exitAvg = exitQty > 0 ? (exitCost / exitQty).toFixed(2) : '—';
+      const exitAction = isLong ? 'Sell' : 'Buy';
+      exitNote =
+        `<div style="font-size:11px;color:#fbbf24;margin:4px 0;line-height:1.4">` +
+          `${data.exit_trades.length} partial unwind already executed: ` +
+          `${exitAction} ${fmt(exitQty, 0)} shares @ avg $${exitAvg}` +
+          (data.effective_max_rungs != null && data.effective_max_rungs < (data.params?.max_rungs ?? max_rungs)
+            ? ` — suggesting ${data.effective_max_rungs} rungs instead of ${data.params?.max_rungs ?? max_rungs}`
+            : '') +
+        `</div>`;
+    }
+
+    // --- streak description -----------------------------------------------
+    const hasExits = data.exit_trades && data.exit_trades.length > 0;
+    const streakDesc = hasExits
+      ? `<span class="strat-highlight">${data.streak_count}</span> ${esc(dir)} detected`
+      : `<span class="strat-highlight">${data.streak_count}</span> consecutive ${esc(dir)} detected`;
+
     banner.innerHTML =
       priceHeader +
       `<div class="ladder-strategy-banner">` +
-        `<span class="strat-highlight">${data.streak_count}</span> consecutive ${esc(dir)} detected — ` +
+        streakDesc + ` — ` +
         `<span class="strat-highlight">${fmt(data.total_shares, 0)}</span> shares, ` +
         `avg <span class="strat-highlight">$${fmt(data.overall_avg, 2)}</span>` +
       `</div>` +
+      exitNote +
       warningHtml +
       `<table style="width:100%;margin:6px 0"><thead><tr>` +
         `<th style="font-size:10px;padding:3px 6px">#</th>` +

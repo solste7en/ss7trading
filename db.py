@@ -182,12 +182,17 @@ def get_top_tickers(top_n=10, recent_n=5):
 _ACCUM_UNWIND = {"Buy": "sell", "Sell Short": "buy_to_cover"}
 
 
+_EXIT_TOLERANCE = 0.30   # exits up to 30 % of total volume are "noise"
+
+
 def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
                             premium_cents=77, min_streak=10, max_rungs=5):
-    """Analyse consecutive same-direction equity trades for *ticker* and
-    generate suggested ladder rungs to unwind the position.
+    """Analyse recent equity trades for *ticker* and generate suggested
+    ladder rungs to unwind the position.
 
-    Returns a dict with streak info, suggested rungs, and the parameters used.
+    Uses a volume-based tolerance model: partial exits (up to 30 % of
+    cumulative volume) are treated as already-filled rungs rather than
+    breaking the streak.
     """
     conn = _connect()
     cur = conn.cursor()
@@ -201,88 +206,171 @@ def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
     all_trades = [dict(r) for r in cur.fetchall()]
     conn.close()
 
-    # most recent trade price as a fallback reference
     last_trade_price = all_trades[0]["price"] if all_trades else None
 
     if not all_trades:
         return {"streak_count": 0, "rungs": [],
                 "note": "No equity trades found for this ticker"}
 
-    # --- find the most recent streak (always the consecutive run from trade[0]) -
-    # The streak direction is always the most recent trade's action — never
-    # dig into history to find a longer one.
-    direction = all_trades[0]["action"]
-    streak = []
+    # --- Phase 1: determine dominant accumulation direction ------------------
+    # Find the first consecutive run at the top.  Then find the next run of
+    # a *different* action.  If the second run is accumulation and has much
+    # more volume than the first, treat the first run as partial exits and
+    # adopt the second run's direction.  This handles the common case of a
+    # few recent Buys interrupting a long series of Sell Shorts (or vice
+    # versa).
+    first_action = all_trades[0]["action"]
+    first_run = []
     for t in all_trades:
-        if t["action"] == direction:
-            streak.append(t)
+        if t["action"] == first_action:
+            first_run.append(t)
         else:
-            break   # first different action ends the streak
+            break
+    first_run_vol = sum(abs(t["quantity"]) for t in first_run)
 
-    unwind_action = _ACCUM_UNWIND.get(direction)   # None for exits (Sell, Buy to Cover)
+    # Find the second run (different action, consecutive from where first_run ended)
+    second_action = None
+    second_run_vol = 0.0
+    for t in all_trades[len(first_run):]:
+        if second_action is None:
+            second_action = t["action"]
+        if t["action"] == second_action:
+            second_run_vol += abs(t["quantity"])
+        else:
+            break
 
-    # --- handle exit streaks (Sell or Buy to Cover at the top) ---------------
-    if unwind_action is None:
-        # Most recent trades are already exits — show streak context and no rungs
-        total_shares = sum(t["quantity"] for t in streak)
+    # Decide direction: if the first run is accumulation and the second run
+    # is also accumulation (opposite), the second run's direction dominates
+    # only if the first run's volume is within the exit tolerance relative
+    # to total.  Otherwise the first run is genuinely the direction.
+    first_is_accum  = first_action in _ACCUM_UNWIND
+    second_is_accum = second_action in _ACCUM_UNWIND if second_action else False
+
+    combined = first_run_vol + second_run_vol
+    first_run_is_noise = (combined > 0
+                          and first_run_vol / combined <= _EXIT_TOLERANCE)
+
+    if first_is_accum and second_is_accum and second_action != first_action \
+            and first_run_is_noise:
+        direction = second_action
+    elif first_is_accum:
+        direction = first_action
+    elif second_is_accum:
+        direction = second_action
+    else:
+        exit_action = first_action
+        total_shares = sum(abs(t["quantity"]) for t in all_trades)
         return {
-            "streak_count": len(streak),
-            "direction": direction,
+            "streak_count": len(all_trades),
+            "direction": exit_action,
             "unwind_action": None,
             "total_shares": round(total_shares, 2),
             "overall_avg": 0,
             "last_trade_price": last_trade_price,
             "rungs": [],
+            "exit_trades": [],
             "params": _pack_params(window_size, sell_pct, premium_cents,
                                    min_streak, max_rungs),
-            "note": (f"Most recent streak is {len(streak)} consecutive "
-                     f"{direction}(s) — no accumulation to unwind"),
+            "note": (f"All recent trades are exits"
+                     f" — no accumulation to unwind"),
         }
 
-    if len(streak) < min_streak:
-        total_shares = sum(t["quantity"] for t in streak)
-        total_cost   = sum(t["quantity"] * t["price"] for t in streak)
+    unwind_action = _ACCUM_UNWIND[direction]
+    accum_actions = {direction}
+    exit_actions  = {"Sell", "Buy to Cover", "Sell Short", "Buy"} - accum_actions
+
+    # --- Phase 1b: volume-tolerance scan ------------------------------------
+    # Walk newest → oldest.  Track cumulative accum vs exit volume.
+    # Stop when exit share ratio exceeds _EXIT_TOLERANCE, but only enforce
+    # the ratio check once we've seen at least one accumulation trade
+    # (initial exits before any accum trades are always tolerated).
+    accum_trades = []
+    exit_trades  = []
+    accum_qty    = 0.0
+    exit_qty     = 0.0
+
+    for t in all_trades:
+        q = abs(t["quantity"])
+        if t["action"] in accum_actions:
+            accum_qty += q
+            accum_trades.append(t)
+        else:
+            if accum_qty > 0:
+                total_so_far = accum_qty + exit_qty + q
+                if (exit_qty + q) / total_so_far > _EXIT_TOLERANCE:
+                    break
+            exit_qty += q
+            exit_trades.append(t)
+
+    # --- handle case where scan found only exits at the top ------------------
+    if not accum_trades:
+        return {
+            "streak_count": 0,
+            "direction": direction,
+            "unwind_action": unwind_action,
+            "total_shares": 0,
+            "overall_avg": 0,
+            "last_trade_price": last_trade_price,
+            "rungs": [],
+            "exit_trades": _summarise_exits(exit_trades),
+            "params": _pack_params(window_size, sell_pct, premium_cents,
+                                   min_streak, max_rungs),
+            "note": "No accumulation trades found within tolerance window",
+        }
+
+    # --- Phase 4: min_streak on accumulation trade count ---------------------
+    if len(accum_trades) < min_streak:
+        total_shares = sum(abs(t["quantity"]) for t in accum_trades)
+        total_cost   = sum(abs(t["quantity"]) * t["price"] for t in accum_trades)
         overall_avg  = round(total_cost / total_shares, 4) if total_shares else 0
         return {
-            "streak_count": len(streak),
+            "streak_count": len(accum_trades),
             "direction": direction,
             "unwind_action": unwind_action,
             "total_shares": round(total_shares, 2),
             "overall_avg": overall_avg,
             "last_trade_price": last_trade_price,
             "rungs": [],
+            "exit_trades": _summarise_exits(exit_trades),
             "params": _pack_params(window_size, sell_pct, premium_cents,
                                    min_streak, max_rungs),
-            "note": (f"Only {len(streak)} consecutive "
-                     f"{direction} trades found (minimum: {min_streak})"),
+            "note": (f"Only {len(accum_trades)} {direction} trades found"
+                     f" (minimum: {min_streak})"),
         }
 
-    # --- aggregate streak stats ---------------------------------------------
-    total_shares = sum(t["quantity"] for t in streak)
-    total_cost = sum(t["quantity"] * t["price"] for t in streak)
-    overall_avg = round(total_cost / total_shares, 4) if total_shares else 0
+    # --- aggregate stats on accumulation trades ------------------------------
+    total_shares = sum(abs(t["quantity"]) for t in accum_trades)
+    total_cost   = sum(abs(t["quantity"]) * t["price"] for t in accum_trades)
+    overall_avg  = round(total_cost / total_shares, 4) if total_shares else 0
+
+    # --- Phase 3: adjust max_rungs proportionally for partial exits ----------
+    if exit_qty > 0:
+        exit_ratio = exit_qty / (accum_qty + exit_qty)
+        rungs_used = max(1, round(max_rungs * exit_ratio))
+        effective_max_rungs = max(1, max_rungs - rungs_used)
+    else:
+        effective_max_rungs = max_rungs
 
     is_long = (direction == "Buy")
     premium = premium_cents / 100.0
 
-    # --- windowed rung generation -------------------------------------------
+    # --- Phase 5: windowed rung generation (on accum_trades only) ------------
     rungs = []
-    cursor = 0        # current index into *streak*
-    consumed = 0.0    # shares already consumed from streak[cursor]
+    cursor = 0
+    consumed = 0.0
     prev_price = None
 
-    while cursor < len(streak) and len(rungs) < max_rungs:
-        # build a window of up to *window_size* trade records
+    while cursor < len(accum_trades) and len(rungs) < effective_max_rungs:
         window = []
         idx = cursor
-        first_remaining = streak[idx]["quantity"] - consumed
+        first_remaining = abs(accum_trades[idx]["quantity"]) - consumed
         if first_remaining > 0:
             window.append({"qty": first_remaining,
-                           "price": streak[idx]["price"]})
+                           "price": accum_trades[idx]["price"]})
         idx += 1
-        while len(window) < window_size and idx < len(streak):
-            window.append({"qty": streak[idx]["quantity"],
-                           "price": streak[idx]["price"]})
+        while len(window) < window_size and idx < len(accum_trades):
+            window.append({"qty": abs(accum_trades[idx]["quantity"]),
+                           "price": accum_trades[idx]["price"]})
             idx += 1
 
         if not window:
@@ -298,13 +386,11 @@ def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
         if sell_qty <= 0:
             break
 
-        # snap price: find the nearest $X.{premium_cents} above/below avg
         if is_long:
             base = math.floor(win_avg)
             target = base + premium
             if target <= win_avg:
                 target += 1.0
-            # monotonicity: each rung must be strictly higher than the last
             if prev_price is not None:
                 while target <= prev_price:
                     target += 1.0
@@ -328,10 +414,9 @@ def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
             "window_trades": len(window),
         })
 
-        # consume sell_qty shares starting from the most-recent end
         remaining = sell_qty
-        while remaining > 0 and cursor < len(streak):
-            available = streak[cursor]["quantity"] - consumed
+        while remaining > 0 and cursor < len(accum_trades):
+            available = abs(accum_trades[cursor]["quantity"]) - consumed
             if available <= remaining:
                 remaining -= available
                 consumed = 0.0
@@ -343,14 +428,28 @@ def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
     return {
         "direction": direction,
         "unwind_action": unwind_action,
-        "streak_count": len(streak),
+        "streak_count": len(accum_trades),
         "total_shares": round(total_shares, 2),
         "overall_avg": overall_avg,
         "last_trade_price": last_trade_price,
         "rungs": rungs,
+        "exit_trades": _summarise_exits(exit_trades),
+        "effective_max_rungs": effective_max_rungs,
         "params": _pack_params(window_size, sell_pct, premium_cents,
                                min_streak, max_rungs),
     }
+
+
+def _summarise_exits(exit_trades):
+    """Return a compact list of partial-exit trades for the UI."""
+    if not exit_trades:
+        return []
+    return [{
+        "date": t["trade_date"],
+        "action": t["action"],
+        "qty": abs(t["quantity"]),
+        "price": t["price"],
+    } for t in exit_trades]
 
 
 def _pack_params(window_size, sell_pct, premium_cents, min_streak, max_rungs):
