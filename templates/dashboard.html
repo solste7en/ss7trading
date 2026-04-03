@@ -28,7 +28,7 @@
     <span class="tab-group-label">Trade</span>
     <div class="tab"        onclick="switchTab('trade')">⚡ Trade</div>
     <div class="tab"        onclick="switchTab('ladder')">🪜 Ladder</div>
-    <div class="tab"        onclick="switchTab('strategy')">Income</div>
+    <div class="tab"        onclick="switchTab('strategy')">💰 Income</div>
     <div class="tab"        onclick="switchTab('orders')">Open Orders</div>
   </div>
   <div class="tab-group-sep"></div>
@@ -52,8 +52,11 @@
   <div id="pos-error" class="error" style="display:none"></div>
   <div class="table-wrap" id="pos-table" style="display:none">
     <table id="pos-tbl"><thead><tr>
-      <th class="sortable" onclick="sortPositions('symbol')">Symbol <span class="sort-arrow" id="pa-symbol"></span></th>
+      <th style="width:28px"></th>
+      <th class="sortable" onclick="sortPositions('symbol')">Symbol / Strike <span class="sort-arrow" id="pa-symbol"></span></th>
       <th>Type</th>
+      <th>P/C</th>
+      <th>Expiry</th>
       <th class="sortable" onclick="sortPositions('quantity')">Qty <span class="sort-arrow" id="pa-quantity"></span></th>
       <th class="sortable" onclick="sortPositions('avg_price')">Avg Price <span class="sort-arrow" id="pa-avg_price"></span></th>
       <th class="sortable" onclick="sortPositions('current_price')">Mkt Price <span class="sort-arrow" id="pa-current_price"></span></th>
@@ -551,11 +554,13 @@
         <div class="form-grid">
           <div class="form-group">
             <label>Type</label>
-            <select id="sn-type"><option value="PUT">PUT</option><option value="CALL">CALL</option></select>
+            <select id="sn-type" onchange="_autoCalcStratPrice()">
+              <option value="PUT">PUT</option><option value="CALL">CALL</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Action</label>
-            <select id="sn-action">
+            <select id="sn-action" onchange="_autoCalcStratPrice()">
               <option value="SELL_TO_OPEN">Sell to Open</option>
               <option value="BUY_TO_OPEN">Buy to Open</option>
               <option value="BUY_TO_CLOSE">Buy to Close</option>
@@ -564,7 +569,9 @@
           </div>
           <div class="form-group">
             <label>Strike</label>
-            <input type="number" id="sn-strike" step="0.50" min="0" placeholder="170.00" oninput="updateStratPnl()">
+            <select id="sn-strike" onchange="_autoCalcStratPrice()">
+              <option value="">— load chain first —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Contracts</label>
@@ -583,15 +590,21 @@
         <div class="form-grid">
           <div class="form-group">
             <label>Type</label>
-            <select id="sv-type"><option value="CALL">CALL Spread</option><option value="PUT">PUT Spread</option></select>
+            <select id="sv-type" onchange="_populateStrikeDropdowns(); _autoCalcStratPrice();">
+              <option value="CALL">CALL Spread</option><option value="PUT">PUT Spread</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Sell Strike</label>
-            <input type="number" id="sv-sell-strike" step="0.50" min="0" placeholder="Sell leg" oninput="updateStratPnl()">
+            <select id="sv-sell-strike" onchange="_autoCalcStratPrice()">
+              <option value="">— load chain first —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Buy Strike</label>
-            <input type="number" id="sv-buy-strike" step="0.50" min="0" placeholder="Buy leg" oninput="updateStratPnl()">
+            <select id="sv-buy-strike" onchange="_autoCalcStratPrice()">
+              <option value="">— load chain first —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Contracts (each leg)</label>
@@ -618,19 +631,27 @@
         <div class="form-grid">
           <div class="form-group">
             <label>Sell Leg Type</label>
-            <select id="sc-sell-type"><option value="CALL">CALL</option><option value="PUT">PUT</option></select>
+            <select id="sc-sell-type" onchange="_populateStrikeDropdowns(); _autoCalcStratPrice();">
+              <option value="CALL">CALL</option><option value="PUT">PUT</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Sell Strike</label>
-            <input type="number" id="sc-sell-strike" step="0.50" min="0" placeholder="Sell leg" oninput="updateStratPnl()">
+            <select id="sc-sell-strike" onchange="_autoCalcStratPrice()">
+              <option value="">— load chain first —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Buy Leg Type</label>
-            <select id="sc-buy-type"><option value="PUT">PUT</option><option value="CALL">CALL</option></select>
+            <select id="sc-buy-type" onchange="_populateStrikeDropdowns(); _autoCalcStratPrice();">
+              <option value="PUT">PUT</option><option value="CALL">CALL</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Buy Strike</label>
-            <input type="number" id="sc-buy-strike" step="0.50" min="0" placeholder="Buy leg" oninput="updateStratPnl()">
+            <select id="sc-buy-strike" onchange="_autoCalcStratPrice()">
+              <option value="">— load chain first —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Contracts (each leg)</label>
@@ -670,18 +691,22 @@
           </div>
           <div class="form-group">
             <label>Option Type</label>
-            <select id="sb-opt-type"><option value="PUT">PUT</option><option value="CALL">CALL</option></select>
+            <select id="sb-opt-type" onchange="_populateStrikeDropdowns(); _autoCalcStratPrice();">
+              <option value="PUT">PUT</option><option value="CALL">CALL</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Option Action</label>
-            <select id="sb-opt-action">
+            <select id="sb-opt-action" onchange="_autoCalcStratPrice()">
               <option value="SELL_TO_OPEN">Sell to Open</option>
               <option value="BUY_TO_OPEN">Buy to Open</option>
             </select>
           </div>
           <div class="form-group">
             <label>Strike</label>
-            <input type="number" id="sb-strike" step="0.50" min="0" placeholder="170.00">
+            <select id="sb-strike" onchange="_autoCalcStratPrice()">
+              <option value="">— load chain first —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Contracts</label>
@@ -713,6 +738,11 @@
         <div class="trade-chain-header">
           <h3>Option Chain</h3>
           <span id="strat-chain-status" style="font-size:11px;color:#64748b"></span>
+          <div id="strat-chain-pager" style="display:none" class="chain-pager">
+            <button id="chain-prev-btn" class="chain-page-btn" onclick="shiftChainPage(-1)" title="Lower strikes">&#8592; Lower</button>
+            <span id="chain-page-label" class="chain-page-label"></span>
+            <button id="chain-next-btn" class="chain-page-btn" onclick="shiftChainPage(1)" title="Higher strikes">Higher &#8594;</button>
+          </div>
         </div>
         <div id="strat-chain-content" class="table-wrap" style="color:#475569;font-size:12px;padding:4px 0">
           Enter a ticker and select an expiration to browse the chain

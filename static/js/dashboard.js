@@ -212,15 +212,26 @@ async function loadCustomTickerPage(page) {
   }
 }
 
-// ── Positions (sortable table) ────────────────────────────────────
-let _posData = [];
-let _posSortCol = null;
-let _posSortDir = 1;
+// ── Positions (grouped, sortable table) ──────────────────────────
+let _posData       = [];
+let _posSortCol    = null;
+let _posSortDir    = 1;
+let _posExpanded   = new Set(); // set of underlying symbols whose options are expanded
+
+function togglePosGroup(underlying) {
+  if (_posExpanded.has(underlying)) _posExpanded.delete(underlying);
+  else _posExpanded.add(underlying);
+  _renderPositions();
+}
 
 function _renderPositions() {
-  const rows = [..._posData];
+  // Separate equity/ETF/cash from options
+  const nonOptions = _posData.filter(p => p.asset_type !== 'OPTION');
+  const options    = _posData.filter(p => p.asset_type === 'OPTION');
+
+  // Sort non-option rows
   if (_posSortCol) {
-    rows.sort((a, b) => {
+    nonOptions.sort((a, b) => {
       let av = a[_posSortCol], bv = b[_posSortCol];
       if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
       if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
@@ -229,20 +240,130 @@ function _renderPositions() {
       return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
     });
   }
-  document.getElementById('pos-tbody').innerHTML = rows.map(p => {
-    const priceDecimals = p.asset_type === 'OPTION' ? 4 : 2;
-    return `<tr>
-      <td><b>${esc(p.symbol)}</b></td>
+
+  // Build a map: underlying → [option positions]
+  const optMap = {};
+  options.forEach(p => {
+    const key = p.underlying_symbol || p.symbol.split(/\s+/)[0];
+    (optMap[key] = optMap[key] || []).push(p);
+  });
+
+  // Sort each group's options: by expiry (ascending) then strike (ascending) then put/call
+  Object.values(optMap).forEach(grp => grp.sort((a, b) => {
+    const expA = a.option_expiry || '', expB = b.option_expiry || '';
+    if (expA !== expB) return expA < expB ? -1 : 1;
+    const stA = a.option_strike ?? 0, stB = b.option_strike ?? 0;
+    if (stA !== stB) return stA - stB;
+    const pcA = a.put_call || '', pcB = b.put_call || '';
+    return pcA < pcB ? -1 : pcA > pcB ? 1 : 0;
+  }));
+
+  // Collect underlyings that have options but no matching equity row
+  const equitySymbols = new Set(nonOptions.map(p => p.symbol));
+  const orphanUnderlyings = [...new Set(
+    Object.keys(optMap).filter(u => !equitySymbols.has(u))
+  )].sort();
+
+  const html = [];
+
+  // Format ISO expiry "2026-04-10" → "Apr 10 '26"
+  const fmtExpiry = iso => {
+    if (!iso) return '—';
+    const [y, m, d] = iso.split('-');
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m,10)-1];
+    return `${mon} ${parseInt(d,10)} '${y.slice(2)}`;
+  };
+
+  // Helper: render one data row (equity/ETF/cash or option child)
+  const dataRow = (p, isChild = false) => {
+    const isOpt = p.asset_type === 'OPTION';
+    const pd    = isOpt ? 4 : 2;
+    const pcBadge = p.put_call
+      ? `<span class="badge badge-${p.put_call}" style="font-size:10px;padding:1px 6px">${p.put_call}</span>`
+      : '—';
+
+    // For option child rows: show a clean "$STRIKE" label with full OCC in tooltip
+    // For equity rows: show bold ticker; expiry cell is empty
+    let symbolCell, expiryCell;
+    if (isChild) {
+      const strikeLabel = p.option_strike != null ? `$${Number(p.option_strike).toFixed(2)}` : esc(p.symbol);
+      symbolCell = `<span class="pos-opt-symbol" title="${esc(p.symbol)}">${strikeLabel}</span>`;
+      expiryCell = `<span class="pos-opt-expiry${_isExpiringSoon(p.option_expiry) ? ' pos-expiry-soon' : ''}">${fmtExpiry(p.option_expiry)}</span>`;
+    } else {
+      symbolCell = `<b>${esc(p.symbol)}</b>`;
+      expiryCell = '';
+    }
+
+    return `<tr class="${isChild ? 'pos-opt-row' : ''}">
+      <td></td>
+      <td>${symbolCell}</td>
       <td><span class="badge badge-${p.asset_type}">${p.asset_type}</span></td>
+      <td>${pcBadge}</td>
+      <td>${expiryCell}</td>
       <td>${fmt(p.quantity,0)}</td>
-      <td>${p.avg_price!=null?'$'+fmt(p.avg_price,priceDecimals):'—'}</td>
-      <td>${p.current_price!=null?'$'+fmt(p.current_price,priceDecimals):'—'}</td>
+      <td>${p.avg_price!=null?'$'+fmt(p.avg_price,pd):'—'}</td>
+      <td>${p.current_price!=null?'$'+fmt(p.current_price,pd):'—'}</td>
       <td>${p.market_value!=null?'$'+fmt(p.market_value):'—'}</td>
       <td class="${cls(p.unrealized_pl)}">${p.unrealized_pl!=null?'$'+fmtD(p.unrealized_pl):'—'}</td>
       <td class="${cls(p.day_pl)}">${p.day_pl!=null?'$'+fmtD(p.day_pl):'—'}</td>
       <td class="${cls(p.day_pl_pct)}">${p.day_pl_pct!=null?fmtD(p.day_pl_pct)+'%':'—'}</td>
     </tr>`;
-  }).join('');
+  };
+
+  // Flag options expiring within 7 days
+  const _isExpiringSoon = iso => {
+    if (!iso) return false;
+    const diff = (new Date(iso) - new Date()) / 86400000;
+    return diff >= 0 && diff <= 7;
+  };
+
+  // Helper: render options toggle row for a given underlying key
+  const toggleRow = (underlying, opts) => {
+    const expanded  = _posExpanded.has(underlying);
+    const arrow     = expanded ? '▼' : '▶';
+    const optCount  = opts.length;
+    const totalMv   = opts.reduce((s, o) => s + (o.market_value || 0), 0);
+    const totalUpl  = opts.every(o => o.unrealized_pl != null)
+                      ? opts.reduce((s, o) => s + (o.unrealized_pl || 0), 0) : null;
+    const mvStr     = '$' + fmt(totalMv);
+    const uplStr    = totalUpl != null
+      ? `<span class="${cls(totalUpl)}">$${fmtD(totalUpl)}</span>` : '—';
+    return `<tr class="pos-opt-toggle" onclick="togglePosGroup('${esc(underlying)}')">
+      <td class="pos-toggle-arrow">${arrow}</td>
+      <td colspan="4" class="pos-toggle-label">
+        <span class="pos-toggle-ticker">${esc(underlying)}</span>
+        <span class="pos-toggle-meta">${optCount} option position${optCount !== 1 ? 's' : ''}</span>
+      </td>
+      <td></td><td></td><td></td>
+      <td>${mvStr}</td>
+      <td>${uplStr}</td>
+      <td></td><td></td>
+    </tr>`;
+  };
+
+  // Render each equity/ETF/cash row + its options toggle below it
+  for (const p of nonOptions) {
+    html.push(dataRow(p, false));
+    const opts = optMap[p.symbol];
+    if (opts && opts.length) {
+      html.push(toggleRow(p.symbol, opts));
+      if (_posExpanded.has(p.symbol)) {
+        opts.forEach(o => html.push(dataRow(o, true)));
+      }
+    }
+  }
+
+  // Orphan option groups (options with no equity parent in the account)
+  for (const underlying of orphanUnderlyings) {
+    const opts = optMap[underlying];
+    html.push(toggleRow(underlying, opts));
+    if (_posExpanded.has(underlying)) {
+      opts.forEach(o => html.push(dataRow(o, true)));
+    }
+  }
+
+  document.getElementById('pos-tbody').innerHTML = html.join('');
+
   // Update sort arrows
   ['symbol','quantity','avg_price','current_price','market_value','unrealized_pl','day_pl','day_pl_pct'].forEach(col => {
     const el = document.getElementById('pa-' + col);
@@ -1949,6 +2070,7 @@ function setStrategyMode(mode) {
   });
   document.getElementById('strat-result').innerHTML = '';
   document.getElementById('strat-pnl').style.display = 'none';
+  _populateStrikeDropdowns();
   updateStratPnl();
 }
 
@@ -1995,76 +2117,128 @@ async function loadStrategyExpirations(ticker) {
   }
 }
 
+// Chain pagination state
+const CHAIN_PAGE_SIZE = 20;
+let _chainAllStrikes = [];
+let _chainCallMap    = {};
+let _chainPutMap     = {};
+let _chainPageIdx    = 0;   // index into pages; set to middle page on load
+let _chainVisibleStrikes = [];
+
 async function loadStrategyChain() {
-  const expiry = document.getElementById('strat-expiry').value;
+  const expiry  = document.getElementById('strat-expiry').value;
   const content = document.getElementById('strat-chain-content');
   const status  = document.getElementById('strat-chain-status');
   if (!expiry || !_stratTicker) {
     content.innerHTML = '<div style="color:#475569;font-size:12px;padding:4px 0">Select an expiration to browse the chain</div>';
+    document.getElementById('strat-chain-pager').style.display = 'none';
     return;
   }
   status.textContent = 'Loading…';
   content.innerHTML = '<div class="loading" style="padding:12px">Loading option chain…</div>';
   try {
     const data = await fetch('/api/option-chain?symbol=' + encodeURIComponent(_stratTicker) +
-      '&from_date=' + expiry + '&to_date=' + expiry + '&strike_count=20').then(r => r.json());
+      '&from_date=' + expiry + '&to_date=' + expiry + '&strike_count=60').then(r => r.json());
     if (data.error) throw new Error(data.error);
     _stratChainData = data;
 
     const calls = data.calls[expiry] || [];
     const puts  = data.puts[expiry]  || [];
-    const strikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a - b);
-    const callMap = {}; calls.forEach(c => callMap[c.strike] = c);
-    const putMap  = {}; puts.forEach(p => putMap[p.strike] = p);
+    _chainAllStrikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a - b);
+    _chainCallMap = {}; calls.forEach(c => _chainCallMap[c.strike] = c);
+    _chainPutMap  = {}; puts.forEach(p => _chainPutMap[p.strike]  = p);
 
-    if (!strikes.length) {
+    if (!_chainAllStrikes.length) {
       content.innerHTML = '<div style="color:#475569;font-size:12px;padding:4px 0">No contracts found</div>';
       status.textContent = '';
+      document.getElementById('strat-chain-pager').style.display = 'none';
       return;
     }
 
-    const fo = v => v == null ? '—' : Number(v).toFixed(2);
-    const fv = v => v == null ? '—' : Number(v).toLocaleString();
+    // Default to the middle page so ATM strikes are centered
+    const totalPages = Math.ceil(_chainAllStrikes.length / CHAIN_PAGE_SIZE);
+    _chainPageIdx = Math.floor(totalPages / 2);
 
-    const rows = strikes.map(strike => {
-      const c = callMap[strike] || {};
-      const p = putMap[strike]  || {};
-      const cI = c.itm ? ' chain-td-itm' : '';
-      const pI = p.itm ? ' chain-td-itm' : '';
-      return '<tr class="chain-row">' +
-        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.bid) + '</td>' +
-        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.ask) + '</td>' +
-        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.last) + '</td>' +
-        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fv(c.volume) + '</td>' +
-        '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fv(c.oi) + '</td>' +
-        '<td class="chain-td-strike">' + fo(strike) + '</td>' +
-        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.bid) + '</td>' +
-        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.ask) + '</td>' +
-        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.last) + '</td>' +
-        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fv(p.volume) + '</td>' +
-        '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fv(p.oi) + '</td>' +
-      '</tr>';
-    }).join('');
-
-    content.innerHTML =
-      '<table class="chain-table" onclick="onStratChainClick(event)">' +
-      '<thead><tr>' +
-        '<th class="chain-th-calls" colspan="5">CALLS</th>' +
-        '<th class="chain-th-strike">STRIKE</th>' +
-        '<th class="chain-th-puts" colspan="5">PUTS</th>' +
-      '</tr><tr>' +
-        '<th class="chain-th-calls">Bid</th><th class="chain-th-calls">Ask</th><th class="chain-th-calls">Last</th>' +
-        '<th class="chain-th-calls">Vol</th><th class="chain-th-calls">OI</th>' +
-        '<th class="chain-th-strike"></th>' +
-        '<th class="chain-th-puts">Bid</th><th class="chain-th-puts">Ask</th><th class="chain-th-puts">Last</th>' +
-        '<th class="chain-th-puts">Vol</th><th class="chain-th-puts">OI</th>' +
-      '</tr></thead>' +
-      '<tbody>' + rows + '</tbody></table>' +
-      '<div class="chain-click-hint">Click any call or put row to fill the strategy form</div>';
-    status.textContent = strikes.length + ' strikes';
+    _renderChainPage();
+    _populateStrikeDropdowns();
   } catch(e) {
     content.innerHTML = '<div style="color:#f87171;font-size:12px;padding:4px 0">Error: ' + esc(e.message) + '</div>';
     status.textContent = '';
+    document.getElementById('strat-chain-pager').style.display = 'none';
+  }
+}
+
+function shiftChainPage(delta) {
+  const totalPages = Math.ceil(_chainAllStrikes.length / CHAIN_PAGE_SIZE);
+  _chainPageIdx = Math.max(0, Math.min(totalPages - 1, _chainPageIdx + delta));
+  _renderChainPage();
+  _populateStrikeDropdowns();
+}
+
+function _renderChainPage() {
+  const content    = document.getElementById('strat-chain-content');
+  const status     = document.getElementById('strat-chain-status');
+  const pager      = document.getElementById('strat-chain-pager');
+  const prevBtn    = document.getElementById('chain-prev-btn');
+  const nextBtn    = document.getElementById('chain-next-btn');
+  const pageLabel  = document.getElementById('chain-page-label');
+
+  const totalPages = Math.ceil(_chainAllStrikes.length / CHAIN_PAGE_SIZE);
+  const start      = _chainPageIdx * CHAIN_PAGE_SIZE;
+  const pageStrikes = _chainAllStrikes.slice(start, start + CHAIN_PAGE_SIZE);
+  _chainVisibleStrikes = pageStrikes;
+
+  const fo = v => v == null ? '—' : Number(v).toFixed(2);
+  const fv = v => v == null ? '—' : Number(v).toLocaleString();
+
+  const rows = pageStrikes.map(strike => {
+    const c  = _chainCallMap[strike] || {};
+    const p  = _chainPutMap[strike]  || {};
+    const cI = c.itm ? ' chain-td-itm' : '';
+    const pI = p.itm ? ' chain-td-itm' : '';
+    return '<tr class="chain-row">' +
+      '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.bid) + '</td>' +
+      '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.ask) + '</td>' +
+      '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fo(c.last) + '</td>' +
+      '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fv(c.volume) + '</td>' +
+      '<td class="chain-td-call' + cI + '" data-side="CALL" data-strike="' + strike + '">' + fv(c.oi) + '</td>' +
+      '<td class="chain-td-strike">' + fo(strike) + '</td>' +
+      '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.bid) + '</td>' +
+      '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.ask) + '</td>' +
+      '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fo(p.last) + '</td>' +
+      '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fv(p.volume) + '</td>' +
+      '<td class="chain-td-put' + pI + '" data-side="PUT" data-strike="' + strike + '">' + fv(p.oi) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  content.innerHTML =
+    '<table class="chain-table" onclick="onStratChainClick(event)">' +
+    '<thead><tr>' +
+      '<th class="chain-th-calls" colspan="5">CALLS</th>' +
+      '<th class="chain-th-strike">STRIKE</th>' +
+      '<th class="chain-th-puts" colspan="5">PUTS</th>' +
+    '</tr><tr>' +
+      '<th class="chain-th-calls">Bid</th><th class="chain-th-calls">Ask</th><th class="chain-th-calls">Last</th>' +
+      '<th class="chain-th-calls">Vol</th><th class="chain-th-calls">OI</th>' +
+      '<th class="chain-th-strike"></th>' +
+      '<th class="chain-th-puts">Bid</th><th class="chain-th-puts">Ask</th><th class="chain-th-puts">Last</th>' +
+      '<th class="chain-th-puts">Vol</th><th class="chain-th-puts">OI</th>' +
+    '</tr></thead>' +
+    '<tbody>' + rows + '</tbody></table>' +
+    '<div class="chain-click-hint">Click any call or put row to fill the strategy form</div>';
+
+  // Update status and pager
+  const lo = pageStrikes.length ? pageStrikes[0].toFixed(2) : '—';
+  const hi = pageStrikes.length ? pageStrikes[pageStrikes.length - 1].toFixed(2) : '—';
+  status.textContent = pageStrikes.length + ' strikes ($' + lo + ' – $' + hi + ')';
+
+  if (totalPages > 1) {
+    pager.style.display = 'flex';
+    prevBtn.disabled  = (_chainPageIdx === 0);
+    nextBtn.disabled  = (_chainPageIdx >= totalPages - 1);
+    pageLabel.textContent = 'Page ' + (_chainPageIdx + 1) + ' / ' + totalPages;
+  } else {
+    pager.style.display = 'none';
   }
 }
 
@@ -2076,17 +2250,13 @@ function onStratChainClick(e) {
   const expiry = document.getElementById('strat-expiry').value;
   if (!side || !strike || !expiry || !_stratChainData) return;
 
-  const contracts = side === 'CALL' ? (_stratChainData.calls[expiry] || []) : (_stratChainData.puts[expiry] || []);
-  const contract = contracts.find(c => c.strike === strike);
-  const mid = contract && contract.bid != null && contract.ask != null
-    ? ((contract.bid + contract.ask) / 2).toFixed(2) : '';
-
   if (stratMode === 'naked') {
-    document.getElementById('sn-type').value   = side;
+    document.getElementById('sn-type').value = side;
+    _populateStrikeDropdowns();
     document.getElementById('sn-strike').value = strike;
-    document.getElementById('sn-price').value  = mid;
   } else if (stratMode === 'vertical') {
     document.getElementById('sv-type').value = side;
+    _populateStrikeDropdowns();
     if (!document.getElementById('sv-sell-strike').value) {
       document.getElementById('sv-sell-strike').value = strike;
     } else if (!document.getElementById('sv-buy-strike').value) {
@@ -2098,13 +2268,19 @@ function onStratChainClick(e) {
   } else if (stratMode === 'collar') {
     if (side === 'CALL') {
       document.getElementById('sc-sell-type').value = 'CALL';
+      _populateStrikeDropdowns();
       document.getElementById('sc-sell-strike').value = strike;
     } else {
       document.getElementById('sc-buy-type').value = 'PUT';
+      _populateStrikeDropdowns();
       document.getElementById('sc-buy-strike').value = strike;
     }
+  } else if (stratMode === 'bundle') {
+    document.getElementById('sb-opt-type').value = side;
+    _populateStrikeDropdowns();
+    document.getElementById('sb-strike').value = strike;
   }
-  updateStratPnl();
+  _autoCalcStratPrice();
 }
 
 // ── Suggestions ──────────────────────────────────────────────────
@@ -2151,55 +2327,52 @@ async function loadStrategySuggestions(ticker) {
   }
 }
 
-function applyStrategySuggestion(index) {
+async function applyStrategySuggestion(index) {
   const s = _stratSuggestions[index];
   if (!s) return;
 
-  // Switch to the right mode
   setStrategyMode(s.strategy || 'naked');
 
-  // Set expiry if legs have it
+  // If legs specify an expiry, set it and await chain load so dropdowns can be populated
   const legExpiry = s.legs && s.legs.length > 0 ? s.legs[0].expiry : null;
   if (legExpiry) {
     const sel = document.getElementById('strat-expiry');
-    if (sel) {
-      sel.value = legExpiry;
-      loadStrategyChain();
-    }
+    if (sel) sel.value = legExpiry;
   }
+  await loadStrategyChain();  // ensures _stratChainData is fresh before populating
 
   if (s.strategy === 'naked' && s.legs && s.legs.length === 1) {
     const leg = s.legs[0];
     document.getElementById('sn-type').value   = leg.option_type || 'CALL';
+    _populateStrikeDropdowns();
     document.getElementById('sn-action').value = leg.instruction || 'SELL_TO_OPEN';
     document.getElementById('sn-strike').value = leg.strike || '';
     document.getElementById('sn-qty').value    = leg.quantity || 1;
-    document.getElementById('sn-price').value  = leg.est_premium || s.price || '';
   } else if (s.strategy === 'vertical' && s.legs && s.legs.length === 2) {
     const sellLeg = s.legs.find(l => l.instruction.includes('SELL'));
     const buyLeg  = s.legs.find(l => l.instruction.includes('BUY'));
     if (sellLeg && buyLeg) {
-      document.getElementById('sv-type').value         = sellLeg.option_type || 'CALL';
-      document.getElementById('sv-sell-strike').value   = sellLeg.strike || '';
-      document.getElementById('sv-buy-strike').value    = buyLeg.strike || '';
-      document.getElementById('sv-qty').value           = sellLeg.quantity || 1;
-      document.getElementById('sv-price').value         = s.price || '';
-      document.getElementById('sv-order-type').value    = s.order_type || 'NET_CREDIT';
+      document.getElementById('sv-type').value = sellLeg.option_type || 'CALL';
+      _populateStrikeDropdowns();
+      document.getElementById('sv-sell-strike').value = sellLeg.strike || '';
+      document.getElementById('sv-buy-strike').value  = buyLeg.strike  || '';
+      document.getElementById('sv-qty').value         = sellLeg.quantity || 1;
+      document.getElementById('sv-order-type').value  = s.order_type || 'NET_CREDIT';
     }
   } else if (s.strategy === 'collar' && s.legs && s.legs.length === 2) {
     const sellLeg = s.legs.find(l => l.instruction.includes('SELL'));
     const buyLeg  = s.legs.find(l => l.instruction.includes('BUY'));
     if (sellLeg && buyLeg) {
-      document.getElementById('sc-sell-type').value    = sellLeg.option_type || 'CALL';
-      document.getElementById('sc-sell-strike').value  = sellLeg.strike || '';
-      document.getElementById('sc-buy-type').value     = buyLeg.option_type || 'PUT';
-      document.getElementById('sc-buy-strike').value   = buyLeg.strike || '';
-      document.getElementById('sc-qty').value          = sellLeg.quantity || 1;
-      document.getElementById('sc-price').value        = s.price || '';
-      document.getElementById('sc-order-type').value   = s.order_type || 'NET_ZERO';
+      document.getElementById('sc-sell-type').value = sellLeg.option_type || 'CALL';
+      document.getElementById('sc-buy-type').value  = buyLeg.option_type  || 'PUT';
+      _populateStrikeDropdowns();
+      document.getElementById('sc-sell-strike').value = sellLeg.strike || '';
+      document.getElementById('sc-buy-strike').value  = buyLeg.strike  || '';
+      document.getElementById('sc-qty').value         = sellLeg.quantity || 1;
+      document.getElementById('sc-order-type').value  = s.order_type || 'NET_ZERO';
     }
   }
-  updateStratPnl();
+  _autoCalcStratPrice();
   document.querySelector('.strat-forms-col').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -2611,6 +2784,116 @@ function _findChainContract(type, strike, expiry) {
   const map = type === 'CALL' ? _stratChainData.calls : _stratChainData.puts;
   const contracts = map ? (map[expiry] || []) : [];
   return contracts.find(c => c.strike === strike) || null;
+}
+
+// Populate all strike <select> elements from the currently loaded chain data.
+// Each dropdown type-pair (CALL or PUT based on context) gets the right strikes.
+// Build <option> HTML for a strike dropdown, using only the currently visible
+// page strikes but keeping the currently selected value even if it's off-page
+// (shown as an out-of-range entry so the form doesn't silently clear it).
+function _makeStrikeOpts(type, currentValue) {
+  const map = type === 'CALL' ? _chainCallMap : _chainPutMap;
+  // Strikes to show = visible page; if selected value is outside page, append it
+  let strikes = _chainVisibleStrikes.slice();
+  const curFloat = parseFloat(currentValue);
+  if (curFloat && !strikes.includes(curFloat)) strikes = [...strikes, curFloat].sort((a,b)=>a-b);
+
+  let html = '<option value="">— select strike —</option>';
+  strikes.forEach(k => {
+    const c   = map[k] || {};
+    const sel = (curFloat === k) ? ' selected' : '';
+    const mid = (c.bid != null && c.ask != null) ? ' · mid ' + ((c.bid + c.ask) / 2).toFixed(2) : '';
+    const outOfPage = !_chainVisibleStrikes.includes(k) ? ' ◀ off-page' : '';
+    html += `<option value="${k}"${sel}>$${k.toFixed(2)} (bid ${(c.bid || 0).toFixed(2)} / ask ${(c.ask || 0).toFixed(2)}${mid}${outOfPage})</option>`;
+  });
+  return html;
+}
+
+function _populateStrikeDropdowns() {
+  if (!_chainVisibleStrikes.length) return;
+
+  const snSel = document.getElementById('sn-strike');
+  snSel.innerHTML = _makeStrikeOpts(document.getElementById('sn-type').value, snSel.value);
+
+  const svSell = document.getElementById('sv-sell-strike');
+  const svBuy  = document.getElementById('sv-buy-strike');
+  const svType = document.getElementById('sv-type').value;
+  svSell.innerHTML = _makeStrikeOpts(svType, svSell.value);
+  svBuy.innerHTML  = _makeStrikeOpts(svType, svBuy.value);
+
+  const scSell = document.getElementById('sc-sell-strike');
+  const scBuy  = document.getElementById('sc-buy-strike');
+  scSell.innerHTML = _makeStrikeOpts(document.getElementById('sc-sell-type').value, scSell.value);
+  scBuy.innerHTML  = _makeStrikeOpts(document.getElementById('sc-buy-type').value,  scBuy.value);
+
+  const sbSel = document.getElementById('sb-strike');
+  sbSel.innerHTML = _makeStrikeOpts(document.getElementById('sb-opt-type').value, sbSel.value);
+}
+
+// Auto-calculate and prefill the price field whenever a strike or type changes.
+// For a sell leg: use bid (what you receive). For a buy leg: use ask (what you pay).
+// Net = sell_bid - buy_ask.
+function _autoCalcStratPrice() {
+  if (!_stratChainData) { updateStratPnl(); return; }
+  const expiry = document.getElementById('strat-expiry').value;
+  if (!expiry) { updateStratPnl(); return; }
+
+  const getContract = (type, strikeVal) => {
+    const strike = parseFloat(strikeVal);
+    if (!strike) return null;
+    return _findChainContract(type, strike, expiry);
+  };
+
+  if (stratMode === 'naked') {
+    const type   = document.getElementById('sn-type').value;
+    const action = document.getElementById('sn-action').value;
+    const c      = getContract(type, document.getElementById('sn-strike').value);
+    if (c) {
+      const isSell = action.includes('SELL');
+      // sell: use bid (conservative); buy: use ask (conservative)
+      const price = isSell
+        ? (c.bid != null ? c.bid : null)
+        : (c.ask != null ? c.ask : null);
+      if (price != null) document.getElementById('sn-price').value = price.toFixed(2);
+    }
+
+  } else if (stratMode === 'vertical') {
+    const type    = document.getElementById('sv-type').value;
+    const sellC   = getContract(type, document.getElementById('sv-sell-strike').value);
+    const buyC    = getContract(type, document.getElementById('sv-buy-strike').value);
+    if (sellC && buyC && sellC.bid != null && buyC.ask != null) {
+      const net = sellC.bid - buyC.ask;
+      document.getElementById('sv-price').value = Math.abs(net).toFixed(2);
+      document.getElementById('sv-order-type').value = net >= 0 ? 'NET_CREDIT' : 'NET_DEBIT';
+    } else if (sellC && !buyC && sellC.bid != null) {
+      document.getElementById('sv-price').value = sellC.bid.toFixed(2);
+    }
+
+  } else if (stratMode === 'collar') {
+    const sellType = document.getElementById('sc-sell-type').value;
+    const buyType  = document.getElementById('sc-buy-type').value;
+    const sellC    = getContract(sellType, document.getElementById('sc-sell-strike').value);
+    const buyC     = getContract(buyType,  document.getElementById('sc-buy-strike').value);
+    if (sellC && buyC && sellC.bid != null && buyC.ask != null) {
+      const net = sellC.bid - buyC.ask;
+      document.getElementById('sc-price').value = Math.abs(net).toFixed(2);
+      document.getElementById('sc-order-type').value = net >= 0 ? 'NET_CREDIT' : (net === 0 ? 'NET_ZERO' : 'NET_DEBIT');
+    } else if (sellC && !buyC && sellC.bid != null) {
+      document.getElementById('sc-price').value = sellC.bid.toFixed(2);
+    }
+
+  } else if (stratMode === 'bundle') {
+    const type   = document.getElementById('sb-opt-type').value;
+    const action = document.getElementById('sb-opt-action').value;
+    const c      = getContract(type, document.getElementById('sb-strike').value);
+    if (c) {
+      const isSell = action.includes('SELL');
+      const price  = isSell ? c.bid : c.ask;
+      if (price != null) document.getElementById('sb-price').value = price.toFixed(2);
+    }
+  }
+
+  updateStratPnl();
 }
 
 function previewStrategy() {

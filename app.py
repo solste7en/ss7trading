@@ -64,6 +64,23 @@ _ASSET_TYPE_MAP = {
     "COLLECTIVE_INVESTMENT": "ETF",
 }
 
+_OCC_RE = re.compile(
+    r'^(?P<under>.{6})(?P<yy>\d{2})(?P<mm>\d{2})(?P<dd>\d{2})[CP](?P<strike>\d{8})$'
+)
+
+def _parse_occ(symbol):
+    """Extract (expiry_iso, strike_float) from a 21-char OCC symbol.
+    e.g. 'NVDA  260410P00170000' → ('2026-04-10', 170.0)
+    Returns (None, None) if the symbol doesn't match.
+    """
+    m = _OCC_RE.match(symbol.replace(' ', ' ').ljust(21)[:21])
+    if not m:
+        return None, None
+    expiry = f"20{m.group('yy')}-{m.group('mm')}-{m.group('dd')}"
+    strike = int(m.group('strike')) / 1000.0
+    return expiry, strike
+
+
 def _clean_positions(accounts_data):
     """Parse the Schwab account response into a flat list of position dicts."""
     positions = []
@@ -71,17 +88,26 @@ def _clean_positions(accounts_data):
         acct_info = acct.get("securitiesAccount", {})
         acct_number = acct_info.get("accountNumber", "")
         for pos in acct_info.get("positions", []):
-            instrument  = pos.get("instrument", {})
-            raw_type    = instrument.get("assetType", "")
-            asset_type  = _ASSET_TYPE_MAP.get(raw_type, raw_type)
-            symbol      = instrument.get("symbol", "")
-            description = instrument.get("description", symbol)
-            qty         = pos.get("longQuantity", 0) - pos.get("shortQuantity", 0)
-            avg_price   = pos.get("averagePrice")
-            mkt_value   = pos.get("marketValue")
-            cost_basis  = pos.get("longOpenProfitLoss")
-            day_pl      = pos.get("currentDayProfitLoss")
-            day_pl_pct  = pos.get("currentDayProfitLossPercentage")
+            instrument         = pos.get("instrument", {})
+            raw_type           = instrument.get("assetType", "")
+            asset_type         = _ASSET_TYPE_MAP.get(raw_type, raw_type)
+            symbol             = instrument.get("symbol", "")
+            description        = instrument.get("description", symbol)
+            put_call           = instrument.get("putCall")          # "PUT" | "CALL" | None
+            underlying_symbol  = instrument.get("underlyingSymbol") # e.g. "NVDA" for options
+
+            qty        = pos.get("longQuantity", 0) - pos.get("shortQuantity", 0)
+            avg_price  = pos.get("averagePrice")
+            mkt_value  = pos.get("marketValue")
+            day_pl     = pos.get("currentDayProfitLoss")
+            day_pl_pct = pos.get("currentDayProfitLossPercentage")
+
+            # Unrealized P&L: long positions use longOpenProfitLoss,
+            # short positions use shortOpenProfitLoss (previously always None for shorts).
+            if qty >= 0:
+                unrealized_pl = pos.get("longOpenProfitLoss")
+            else:
+                unrealized_pl = pos.get("shortOpenProfitLoss")
 
             # Current price: per-share for equity/ETF, per-share for options (÷100)
             current_price = None
@@ -91,18 +117,27 @@ def _clean_positions(accounts_data):
                 else:
                     current_price = mkt_value / abs(qty)
 
+            # Parse expiry and strike from OCC symbol for options
+            option_expiry, option_strike = (None, None)
+            if asset_type == "OPTION":
+                option_expiry, option_strike = _parse_occ(symbol)
+
             positions.append({
-                "account":       acct_number[-4:],
-                "symbol":        symbol,
-                "description":   description,
-                "asset_type":    asset_type,
-                "quantity":      qty,
-                "avg_price":     avg_price,
-                "current_price": current_price,
-                "market_value":  mkt_value,
-                "unrealized_pl": cost_basis,
-                "day_pl":        day_pl,
-                "day_pl_pct":    day_pl_pct,
+                "account":            acct_number[-4:],
+                "symbol":             symbol,
+                "description":        description,
+                "asset_type":         asset_type,
+                "put_call":           put_call,
+                "underlying_symbol":  underlying_symbol,
+                "option_expiry":      option_expiry,   # ISO "2026-04-10" or None
+                "option_strike":      option_strike,   # float e.g. 170.0 or None
+                "quantity":           qty,
+                "avg_price":          avg_price,
+                "current_price":      current_price,
+                "market_value":       mkt_value,
+                "unrealized_pl":      unrealized_pl,
+                "day_pl":             day_pl,
+                "day_pl_pct":         day_pl_pct,
             })
     order = {"EQUITY": 0, "ETF": 1, "OPTION": 2, "CASH_EQUIVALENT": 3}
     positions.sort(key=lambda p: (order.get(p["asset_type"], 9), p["symbol"]))
@@ -428,7 +463,7 @@ def api_option_chain():
         symbol       = request.args.get("symbol", "").strip().upper()
         if not symbol:
             return jsonify({"error": "symbol is required"}), 400
-        strike_count = min(40, max(5, int(request.args.get("strike_count", 15))))
+        strike_count = min(100, max(5, int(request.args.get("strike_count", 15))))
         contract_type = request.args.get("contract_type", "ALL").upper()
 
         ct_map = {"ALL": None, "CALL": "CALL", "PUT": "PUT"}

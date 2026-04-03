@@ -81,6 +81,37 @@ tr:hover td { background: #1a1d2e; }
 .badge-CALL { background: #14532d; color: #86efac; }
 .badge-ws   { background: #44270a; color: #fb923c; font-size: 10px; }
 
+/* ── Positions: grouped options ── */
+.pos-opt-toggle {
+  background: #111420;
+  cursor: pointer;
+  user-select: none;
+}
+.pos-opt-toggle:hover td { background: #181c2e; }
+.pos-toggle-arrow {
+  color: #6366f1; font-size: 11px; font-weight: 700;
+  padding: 7px 10px 7px 14px; width: 28px; text-align: center;
+}
+.pos-toggle-label { padding: 7px 8px; }
+.pos-toggle-ticker {
+  font-size: 12px; font-weight: 700; color: #94a3b8; margin-right: 8px;
+}
+.pos-toggle-meta {
+  font-size: 11px; color: #475569;
+}
+.pos-opt-row td { background: #0d1018; padding-top: 6px; padding-bottom: 6px; }
+.pos-opt-row:hover td { background: #13172a; }
+.pos-opt-row td:first-child { border-left: 2px solid #312e81; }
+.pos-opt-symbol {
+  font-size: 12px; font-weight: 600; color: #e2e8f0;
+}
+.pos-opt-expiry {
+  font-size: 11px; color: #94a3b8; white-space: nowrap;
+}
+.pos-expiry-soon {
+  color: #fbbf24; font-weight: 600;
+}
+
 /* ── Watchlist toolbar ── */
 .wl-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
           margin-bottom: 10px; }
@@ -376,6 +407,17 @@ tr:hover td { background: #1a1d2e; }
 .chain-row:hover .chain-td-strike { background: #32384e; cursor: pointer; }
 .chain-click-hint { font-size: 10px; color: #64748b; margin-top: 6px; }
 
+/* Chain pagination */
+.chain-pager { display: flex; align-items: center; gap: 8px; }
+.chain-page-btn {
+  background: #1e2235; border: 1px solid #2d3148; border-radius: 5px;
+  color: #94a3b8; padding: 4px 10px; font-size: 11px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.chain-page-btn:hover:not(:disabled) { background: #312e81; color: #a5b4fc; border-color: #4338ca; }
+.chain-page-btn:disabled { opacity: .35; cursor: default; }
+.chain-page-label { font-size: 11px; color: #64748b; min-width: 70px; text-align: center; }
+
 /* ── Strategy tab ── */
 .strat-layout { display: grid; grid-template-columns: minmax(320px, 1fr) 520px; gap: 16px; }
 @media (max-width: 1080px) { .strat-layout { grid-template-columns: 1fr; } }
@@ -387,6 +429,15 @@ tr:hover td { background: #1a1d2e; }
   padding: 18px 20px; margin-bottom: 14px; }
 .strat-form-title { font-size: 11px; color: #94a3b8; text-transform: uppercase;
   letter-spacing: 0.05em; font-weight: 600; margin-bottom: 12px; }
+
+/* Strike dropdowns in strategy forms */
+#sn-strike, #sv-sell-strike, #sv-buy-strike,
+#sc-sell-strike, #sc-buy-strike, #sb-strike {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* P&L preview box */
 .strat-pnl-box { background: #161a2a; border: 1px solid #2d3148; border-radius: 8px;
