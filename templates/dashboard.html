@@ -36,6 +36,7 @@
     <span class="tab-group-label">Records</span>
     <div class="tab"        onclick="switchTab('history')">Trade History</div>
     <div class="tab"        onclick="switchTab('gains')">Realized G/L</div>
+    <div class="tab"        onclick="switchTab('incomepnl')">📊 Income P&amp;L</div>
   </div>
 </div>
 
@@ -173,6 +174,92 @@
     </tr></thead><tbody id="g-tbody"></tbody></table>
   </div>
   <div class="pagination" id="g-pagination"></div>
+</div>
+
+<!-- ── Income P&L ── -->
+<div class="panel" id="tab-incomepnl">
+  <!-- Top bar: filters + sync -->
+  <div class="ip-toolbar">
+    <div class="ip-filters">
+      <input type="text" id="ip-ticker" placeholder="Ticker (e.g. NVDA)"
+             oninput="debounce(function(){ loadIncomeStats(); loadIncomeTrades(); })">
+      <select id="ip-status" onchange="_ipCardFilter=null; document.querySelectorAll('.ip-kpi-clickable').forEach(e=>e.classList.remove('active')); loadIncomeTrades()">
+        <option value="">All Status</option>
+        <option value="open">Open</option>
+        <option value="closed">Closed</option>
+        <option value="expired">Expired</option>
+        <option value="assigned">Assigned</option>
+      </select>
+      <select id="ip-strategy" onchange="_ipCardFilter=null; document.querySelectorAll('.ip-kpi-clickable').forEach(e=>e.classList.remove('active')); loadIncomeTrades()">
+        <option value="">All Strategies</option>
+        <option value="naked">Naked Options</option>
+        <option value="spread">Spreads</option>
+        <option value="collar">Collar</option>
+      </select>
+      <select id="ip-limit" onchange="loadIncomeTrades()">
+        <option value="25">25 / page</option>
+        <option value="50">50 / page</option>
+        <option value="100">100 / page</option>
+      </select>
+    </div>
+    <div class="ip-sync-area">
+      <span id="ip-last-sync" class="ip-sync-time"></span>
+      <button id="ip-sync-btn" class="ip-sync-btn" onclick="syncIncome()">
+        <span id="ip-sync-icon">&#8635;</span> Sync from Schwab
+      </button>
+    </div>
+  </div>
+
+  <!-- KPI cards -->
+  <div class="ip-kpi-row" id="ip-kpi-row">
+    <div class="ip-kpi-card">
+      <div class="ip-kpi-label">Total Net P&amp;L</div>
+      <div class="ip-kpi-value" id="ip-kpi-pnl">—</div>
+    </div>
+    <div class="ip-kpi-card ip-kpi-clickable" id="ip-kpi-card-win" onclick="setIpCardFilter('win')">
+      <div class="ip-kpi-label">Win Rate</div>
+      <div class="ip-kpi-value" id="ip-kpi-winrate">—</div>
+    </div>
+    <div class="ip-kpi-card ip-kpi-clickable" id="ip-kpi-card-perfect" onclick="setIpCardFilter('perfect')">
+      <div class="ip-kpi-label">Perfect Win Rate</div>
+      <div class="ip-kpi-value" id="ip-kpi-perfect">—</div>
+    </div>
+    <div class="ip-kpi-card ip-kpi-clickable" id="ip-kpi-card-closed" onclick="setIpCardFilter('closed')">
+      <div class="ip-kpi-label">Closed Trades</div>
+      <div class="ip-kpi-value" id="ip-kpi-closed">—</div>
+    </div>
+    <div class="ip-kpi-card ip-kpi-clickable" id="ip-kpi-card-open" onclick="setIpCardFilter('open')">
+      <div class="ip-kpi-label">Open Trades</div>
+      <div class="ip-kpi-value" id="ip-kpi-open">—</div>
+    </div>
+    <div class="ip-kpi-card ip-kpi-clickable" id="ip-kpi-card-assigned" onclick="setIpCardFilter('assigned')">
+      <div class="ip-kpi-label">Assigned</div>
+      <div class="ip-kpi-value" id="ip-kpi-assigned">—</div>
+    </div>
+  </div>
+
+  <!-- Trades table -->
+  <div class="loading" id="ip-loading">Loading…</div>
+  <div id="ip-error" class="error" style="display:none"></div>
+  <span class="count" id="ip-count"></span>
+  <div class="table-wrap" id="ip-table" style="display:none">
+    <table id="ip-tbl"><thead><tr>
+      <th style="width:28px"></th>
+      <th>Ticker</th>
+      <th>Strategy</th>
+      <th>Legs</th>
+      <th>Open</th>
+      <th>Close</th>
+      <th>Days</th>
+      <th>Premium</th>
+      <th>Close Cost</th>
+      <th>Net P&amp;L</th>
+      <th>P&amp;L %</th>
+      <th>Status</th>
+      <th>Outcome</th>
+    </tr></thead><tbody id="ip-tbody"></tbody></table>
+  </div>
+  <div class="pagination" id="ip-pagination"></div>
 </div>
 
 <!-- ── Trade ── -->

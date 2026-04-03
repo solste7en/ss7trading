@@ -23,6 +23,7 @@ function switchTab(name) {
   if (name === 'gains'     && !gainsState.loaded)     loadGains();
   if (name === 'orders'    && !ordersState.loaded)    loadOrders();
   if (name === 'quotes')   initWatchlists();
+  if (name === 'incomepnl' && !incomePnlState.loaded) { loadIncomeStats(); loadIncomeTrades(); }
   if (name === 'strategy' && _stratTicker) {
     loadStrategySuggestions(_stratTicker);
     loadStrategyOrders();
@@ -37,6 +38,7 @@ function refreshCurrent() {
   if (currentTab === 'history')   loadHistory();
   if (currentTab === 'gains')     loadGains();
   if (currentTab === 'orders')    loadOrders();
+  if (currentTab === 'incomepnl') { loadIncomeStats(); loadIncomeTrades(); }
   if (currentTab === 'strategy' && _stratTicker) {
     loadStrategySuggestions(_stratTicker);
     loadStrategyOrders();
@@ -660,18 +662,26 @@ async function loadGains(resetPage=true) {
 }
 
 // ── Pagination helper ─────────────────────────────────────────────
-function renderPagination(containerId, res, loadFn) {
-  const state = loadFn === loadHistory ? historyState : gainsState;
+const _paginationRegistry = {};
+function renderPagination(containerId, res, loadFn, stateObj, fnName) {
+  // Backwards-compat: old callers pass loadFn without stateObj/fnName
+  if (!stateObj) {
+    stateObj = loadFn === loadHistory ? historyState : gainsState;
+    fnName   = loadFn === loadHistory ? 'loadHistory' : 'loadGains';
+  }
   const { page, pages, total, limit } = res;
   const start = (page-1)*limit+1, end = Math.min(page*limit, total);
   const el = document.getElementById(containerId);
   if (pages <= 1) { el.innerHTML=''; return; }
 
+  const uid = containerId;
+  _paginationRegistry[uid] = { state: stateObj, fn: loadFn };
+
   let btns = '';
   const addBtn = (p, label, active, disabled) =>
     `<button class="pg-btn${active?' active':''}" ${disabled?'disabled':''} onclick="
-      ${loadFn===loadHistory?'historyState':'gainsState'}.page=${p};
-      ${loadFn===loadHistory?'loadHistory':'loadGains'}(false)">${label}</button>`;
+      _paginationRegistry['${uid}'].state.page=${p};
+      _paginationRegistry['${uid}'].fn(false)">${label}</button>`;
 
   btns += addBtn(page-1,'‹ Prev', false, page===1);
   const lo=Math.max(1,page-3), hi=Math.min(pages,page+3);
@@ -681,6 +691,211 @@ function renderPagination(containerId, res, loadFn) {
   btns += addBtn(page+1,'Next ›',false,page===pages);
 
   el.innerHTML = `<span class="pg-info">${start}–${end} of ${total.toLocaleString()}</span>` + btns;
+}
+
+// ── Income P&L ────────────────────────────────────────────────────
+const incomePnlState = { page: 1, loaded: false };
+const _ipExpanded = new Set();
+let _ipCardFilter = null;   // 'win' | 'perfect' | 'closed' | 'open' | 'assigned' | null
+
+function setIpCardFilter(filter) {
+  if (_ipCardFilter === filter) {
+    _ipCardFilter = null;   // toggle off
+  } else {
+    _ipCardFilter = filter;
+  }
+  // Update card active states
+  ['win', 'perfect', 'closed', 'open', 'assigned'].forEach(f => {
+    const el = document.getElementById('ip-kpi-card-' + f);
+    if (el) el.classList.toggle('active', _ipCardFilter === f);
+  });
+  loadIncomeTrades(true);
+}
+
+async function loadIncomeStats() {
+  const ticker = document.getElementById('ip-ticker').value.trim().toUpperCase();
+  try {
+    const params = new URLSearchParams();
+    if (ticker) params.set('ticker', ticker);
+    const data = await fetch('/api/income/stats?' + params).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+
+    const pnl = data.total_pnl || 0;
+    const pnlEl = document.getElementById('ip-kpi-pnl');
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    pnlEl.className = 'ip-kpi-value ' + (pnl >= 0 ? 'pos' : 'neg');
+
+    document.getElementById('ip-kpi-winrate').textContent = (data.win_rate || 0) + '%';
+    document.getElementById('ip-kpi-perfect').textContent = (data.perfect_win_rate || 0) + '%';
+    document.getElementById('ip-kpi-closed').textContent  = data.closed_trades || 0;
+    document.getElementById('ip-kpi-open').textContent    = data.open_trades || 0;
+    document.getElementById('ip-kpi-assigned').textContent = data.assigned_count || 0;
+
+    if (data.last_synced) {
+      const dt = new Date(data.last_synced + 'Z');
+      document.getElementById('ip-last-sync').textContent = 'Last sync: ' + dt.toLocaleString();
+    } else {
+      document.getElementById('ip-last-sync').textContent = 'Not synced yet';
+    }
+  } catch (e) {
+    console.error('Income stats error:', e);
+  }
+}
+
+async function loadIncomeTrades(resetPage = true) {
+  if (resetPage) incomePnlState.page = 1;
+  const ticker   = document.getElementById('ip-ticker').value.trim().toUpperCase();
+  const status   = document.getElementById('ip-status').value;
+  const strategy = document.getElementById('ip-strategy').value;
+  const limit    = parseInt(document.getElementById('ip-limit').value) || 25;
+
+  document.getElementById('ip-loading').style.display = '';
+  document.getElementById('ip-table').style.display = 'none';
+  document.getElementById('ip-error').style.display = 'none';
+
+  try {
+    const params = new URLSearchParams({
+      page: incomePnlState.page, limit, ticker, status, strategy
+    });
+    if (_ipCardFilter) params.set('outcome', _ipCardFilter);
+    const res = await fetch('/api/income/trades?' + params).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+
+    incomePnlState.loaded = true;
+    document.getElementById('ip-loading').style.display = 'none';
+    document.getElementById('ip-table').style.display = '';
+    document.getElementById('ip-count').textContent = res.total + ' trades';
+
+    _renderIncomeTrades(res.data);
+    renderPagination('ip-pagination', res, loadIncomeTrades, incomePnlState);
+  } catch (e) {
+    document.getElementById('ip-loading').style.display = 'none';
+    document.getElementById('ip-error').textContent = 'Error: ' + e.message;
+    document.getElementById('ip-error').style.display = '';
+  }
+}
+
+function _renderIncomeTrades(trades) {
+  const tbody = document.getElementById('ip-tbody');
+  let html = '';
+
+  for (const t of trades) {
+    const legs = t.legs || [];
+    const hasLegs = legs.length > 1 || legs.length === 1;
+    const isExpanded = _ipExpanded.has(t.id);
+
+    const legsSummary = legs.map(l => {
+      const dir = l.direction === 'short' ? 'STO' : 'BTO';
+      return dir + ' $' + (l.strike || 0).toFixed(0) + (l.leg_type === 'PUT' ? 'P' : 'C');
+    }).join(' / ');
+
+    const stratBadge = _ipStratBadge(t.strategy);
+    const statusBadge = _ipStatusBadge(t.status);
+    const outcomeBadge = _ipOutcomeBadge(t);
+
+    const pnl = t.net_pnl != null ? t.net_pnl : null;
+    const pnlClass = pnl != null ? (pnl >= 0 ? 'pos' : 'neg') : '';
+    const pnlStr = pnl != null ? (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2) : '—';
+    const pnlPctStr = t.net_pnl_pct != null ? (t.net_pnl_pct >= 0 ? '+' : '') + t.net_pnl_pct.toFixed(1) + '%' : '—';
+    const premStr = t.net_premium != null ? '$' + t.net_premium.toFixed(2) : '—';
+    const closeStr = t.close_cost != null && t.status !== 'open' ? '$' + t.close_cost.toFixed(2) : '—';
+    const arrow = hasLegs ? (isExpanded ? '▼' : '▶') : '';
+
+    html += `<tr class="ip-trade-row" onclick="toggleIncomeTrade(${t.id})" style="cursor:pointer">
+      <td class="ip-toggle-arrow">${arrow}</td>
+      <td><b>${esc(t.underlying)}</b></td>
+      <td>${stratBadge}</td>
+      <td class="ip-legs-cell">${esc(legsSummary)}</td>
+      <td>${t.open_date || '—'}</td>
+      <td>${t.close_date || '—'}</td>
+      <td>${t.days_held != null ? t.days_held : '—'}</td>
+      <td>${premStr}</td>
+      <td>${closeStr}</td>
+      <td class="${pnlClass}">${pnlStr}</td>
+      <td class="${pnlClass}">${pnlPctStr}</td>
+      <td>${statusBadge}</td>
+      <td>${outcomeBadge}</td>
+    </tr>`;
+
+    if (isExpanded && legs.length) {
+      for (const l of legs) {
+        const lDir = l.direction === 'short' ? 'Short' : 'Long';
+        const lPnl = l.leg_pnl != null ? (l.leg_pnl >= 0 ? '+' : '') + '$' + l.leg_pnl.toFixed(2) : '—';
+        const lPnlClass = l.leg_pnl != null ? (l.leg_pnl >= 0 ? 'pos' : 'neg') : '';
+        html += `<tr class="ip-leg-row">
+          <td></td>
+          <td colspan="2" style="padding-left:24px;color:#94a3b8;font-size:11px">
+            ${lDir} ${l.leg_type} $${(l.strike||0).toFixed(2)} exp ${l.expiry || '?'}
+          </td>
+          <td style="font-size:11px;color:#94a3b8">${esc(l.open_action||'')} → ${esc(l.close_action||'open')}</td>
+          <td style="font-size:11px">${l.open_date||'—'}</td>
+          <td style="font-size:11px">${l.close_date||'—'}</td>
+          <td></td>
+          <td style="font-size:11px">$${(l.open_price||0).toFixed(2)} × ${l.open_qty||0}</td>
+          <td style="font-size:11px">${l.close_price != null ? '$'+l.close_price.toFixed(2) : '—'}</td>
+          <td class="${lPnlClass}" style="font-size:11px">${lPnl}</td>
+          <td colspan="3"></td>
+        </tr>`;
+      }
+    }
+  }
+  tbody.innerHTML = html;
+}
+
+function toggleIncomeTrade(id) {
+  if (_ipExpanded.has(id)) _ipExpanded.delete(id);
+  else _ipExpanded.add(id);
+  loadIncomeTrades(false);
+}
+
+function _ipStratBadge(strategy) {
+  const map = {
+    naked_put: ['Naked PUT', 'ip-badge-naked'],
+    naked_call: ['Naked CALL', 'ip-badge-naked'],
+    put_spread: ['Put Spread', 'ip-badge-spread'],
+    call_spread: ['Call Spread', 'ip-badge-spread'],
+    collar: ['Collar', 'ip-badge-collar'],
+    other: ['Other', 'ip-badge-other'],
+  };
+  const [label, cls] = map[strategy] || [strategy, 'ip-badge-other'];
+  return `<span class="ip-badge ${cls}">${label}</span>`;
+}
+
+function _ipStatusBadge(status) {
+  const map = {
+    open: 'ip-status-open',
+    closed: 'ip-status-closed',
+    expired: 'ip-status-expired',
+    assigned: 'ip-status-assigned',
+  };
+  return `<span class="ip-badge ${map[status] || ''}">${status}</span>`;
+}
+
+function _ipOutcomeBadge(t) {
+  if (t.status === 'open') return '<span class="ip-badge ip-outcome-open">—</span>';
+  if (t.is_perfect_win) return '<span class="ip-badge ip-outcome-perfect">Perfect</span>';
+  if (t.is_win) return '<span class="ip-badge ip-outcome-win">Win</span>';
+  return '<span class="ip-badge ip-outcome-loss">Loss</span>';
+}
+
+async function syncIncome() {
+  const btn = document.getElementById('ip-sync-btn');
+  const icon = document.getElementById('ip-sync-icon');
+  btn.disabled = true;
+  icon.classList.add('ip-spin');
+  document.getElementById('ip-last-sync').textContent = 'Syncing…';
+
+  try {
+    const res = await fetch('/api/income/sync', { method: 'POST' }).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+    loadIncomeStats();
+    loadIncomeTrades();
+  } catch (e) {
+    alert('Sync error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    icon.classList.remove('ip-spin');
+  }
 }
 
 // ── Trade form ─────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ Provides reusable query functions for the trades.db SQLite database.
 """
 import math
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / "trades.db"
@@ -550,3 +551,255 @@ def remove_watchlist_symbol(list_id, symbol):
     )
     conn.commit()
     conn.close()
+
+
+# ── Income Performance Tracking ──────────────────────────────────────────────
+
+def _ensure_income_tables(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS income_trades (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            underlying            TEXT    NOT NULL,
+            strategy              TEXT    NOT NULL,
+            open_date             TEXT    NOT NULL,
+            close_date            TEXT,
+            status                TEXT    NOT NULL DEFAULT 'open',
+            days_held             INTEGER,
+            net_premium           REAL,
+            close_cost            REAL    DEFAULT 0,
+            fees                  REAL    DEFAULT 0,
+            net_pnl               REAL,
+            net_pnl_pct           REAL,
+            is_win                INTEGER DEFAULT 0,
+            is_perfect_win        INTEGER DEFAULT 0,
+            assignment_stock_price REAL,
+            dedup_key             TEXT    UNIQUE,
+            synced_at             TEXT    DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_it_underlying ON income_trades(underlying);
+        CREATE INDEX IF NOT EXISTS idx_it_status     ON income_trades(status);
+
+        CREATE TABLE IF NOT EXISTS income_trade_legs (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_id                INTEGER NOT NULL REFERENCES income_trades(id) ON DELETE CASCADE,
+            leg_type                TEXT    NOT NULL,
+            strike                  REAL    NOT NULL,
+            expiry                  TEXT    NOT NULL,
+            direction               TEXT    NOT NULL,
+            open_action             TEXT,
+            open_qty                INTEGER,
+            open_price              REAL,
+            open_date               TEXT,
+            close_action            TEXT,
+            close_qty               INTEGER,
+            close_price             REAL,
+            close_date              TEXT,
+            leg_pnl                 REAL,
+            schwab_open_activity_id INTEGER,
+            schwab_close_activity_id INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_itl_trade ON income_trade_legs(trade_id);
+
+        CREATE TABLE IF NOT EXISTS income_sync_meta (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            last_synced TEXT
+        );
+    """)
+    conn.commit()
+
+
+def clear_income_trades():
+    conn = _connect()
+    _ensure_income_tables(conn)
+    conn.executescript("DELETE FROM income_trade_legs; DELETE FROM income_trades;")
+    conn.commit()
+    conn.close()
+
+
+def upsert_income_trade(trade, legs):
+    """Insert or replace an income trade with its legs.
+    `trade` is a dict, `legs` is a list of dicts."""
+    conn = _connect()
+    _ensure_income_tables(conn)
+    cur = conn.cursor()
+
+    cur.execute("SELECT id FROM income_trades WHERE dedup_key = ?",
+                (trade["dedup_key"],))
+    existing = cur.fetchone()
+    if existing:
+        trade_id = existing[0]
+        cur.execute("DELETE FROM income_trade_legs WHERE trade_id = ?", (trade_id,))
+        cur.execute("""
+            UPDATE income_trades SET
+                underlying=?, strategy=?, open_date=?, close_date=?,
+                status=?, days_held=?, net_premium=?, close_cost=?, fees=?,
+                net_pnl=?, net_pnl_pct=?, is_win=?, is_perfect_win=?,
+                assignment_stock_price=?, synced_at=datetime('now')
+            WHERE id=?
+        """, (trade["underlying"], trade["strategy"], trade["open_date"],
+              trade.get("close_date"), trade["status"], trade.get("days_held"),
+              trade.get("net_premium"), trade.get("close_cost", 0),
+              trade.get("fees", 0), trade.get("net_pnl"),
+              trade.get("net_pnl_pct"), trade.get("is_win", 0),
+              trade.get("is_perfect_win", 0),
+              trade.get("assignment_stock_price"), trade_id))
+    else:
+        cur.execute("""
+            INSERT INTO income_trades
+                (underlying, strategy, open_date, close_date, status, days_held,
+                 net_premium, close_cost, fees, net_pnl, net_pnl_pct,
+                 is_win, is_perfect_win, assignment_stock_price, dedup_key)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (trade["underlying"], trade["strategy"], trade["open_date"],
+              trade.get("close_date"), trade["status"], trade.get("days_held"),
+              trade.get("net_premium"), trade.get("close_cost", 0),
+              trade.get("fees", 0), trade.get("net_pnl"),
+              trade.get("net_pnl_pct"), trade.get("is_win", 0),
+              trade.get("is_perfect_win", 0),
+              trade.get("assignment_stock_price"), trade["dedup_key"]))
+        trade_id = cur.lastrowid
+
+    for leg in legs:
+        cur.execute("""
+            INSERT INTO income_trade_legs
+                (trade_id, leg_type, strike, expiry, direction,
+                 open_action, open_qty, open_price, open_date,
+                 close_action, close_qty, close_price, close_date,
+                 leg_pnl, schwab_open_activity_id, schwab_close_activity_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (trade_id, leg["leg_type"], leg["strike"], leg["expiry"],
+              leg["direction"], leg.get("open_action"), leg.get("open_qty"),
+              leg.get("open_price"), leg.get("open_date"),
+              leg.get("close_action"), leg.get("close_qty"),
+              leg.get("close_price"), leg.get("close_date"),
+              leg.get("leg_pnl"),
+              leg.get("schwab_open_activity_id"),
+              leg.get("schwab_close_activity_id")))
+
+    conn.commit()
+    conn.close()
+    return trade_id
+
+
+def set_income_sync_time():
+    conn = _connect()
+    _ensure_income_tables(conn)
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    conn.execute("""
+        INSERT INTO income_sync_meta (id, last_synced) VALUES (1, ?)
+        ON CONFLICT(id) DO UPDATE SET last_synced = excluded.last_synced
+    """, (now,))
+    conn.commit()
+    conn.close()
+
+
+def get_income_sync_time():
+    conn = _connect()
+    _ensure_income_tables(conn)
+    cur = conn.cursor()
+    cur.execute("SELECT last_synced FROM income_sync_meta WHERE id=1")
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outcome=""):
+    offset = (page - 1) * limit
+    where, params = [], []
+    if ticker:
+        where.append("t.underlying = ?"); params.append(ticker.upper())
+    if status:
+        where.append("t.status = ?"); params.append(status)
+    if strategy:
+        where.append("t.strategy LIKE ?"); params.append(f"%{strategy}%")
+    if outcome == "win":
+        where.append("t.is_win = 1")
+    elif outcome == "perfect":
+        where.append("t.is_perfect_win = 1")
+    elif outcome == "assigned":
+        where.append("t.status = 'assigned'")
+    elif outcome == "open":
+        where.append("t.status = 'open'")
+    elif outcome == "closed":
+        where.append("t.status = 'closed'")
+
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+    conn = _connect()
+    _ensure_income_tables(conn)
+    cur = conn.cursor()
+
+    cur.execute(f"SELECT COUNT(*) FROM income_trades t {clause}", params)
+    total = cur.fetchone()[0]
+
+    cur.execute(f"""
+        SELECT t.* FROM income_trades t {clause}
+        ORDER BY t.open_date DESC, t.id DESC
+        LIMIT ? OFFSET ?
+    """, params + [limit, offset])
+    trades = [dict(r) for r in cur.fetchall()]
+
+    if trades:
+        trade_ids = [t["id"] for t in trades]
+        ph = ",".join("?" for _ in trade_ids)
+        cur.execute(f"""
+            SELECT * FROM income_trade_legs WHERE trade_id IN ({ph})
+            ORDER BY trade_id, id
+        """, trade_ids)
+        legs_by_trade = {}
+        for leg in cur.fetchall():
+            leg_dict = dict(leg)
+            tid = leg_dict["trade_id"]
+            legs_by_trade.setdefault(tid, []).append(leg_dict)
+        for t in trades:
+            t["legs"] = legs_by_trade.get(t["id"], [])
+    else:
+        for t in trades:
+            t["legs"] = []
+
+    conn.close()
+    return {
+        "data": trades,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": math.ceil(total / limit) if total else 0,
+    }
+
+
+def get_income_stats(ticker=""):
+    where, params = [], []
+    if ticker:
+        where.append("underlying = ?"); params.append(ticker.upper())
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+    conn = _connect()
+    _ensure_income_tables(conn)
+    cur = conn.cursor()
+
+    cur.execute(f"""
+        SELECT
+            COUNT(*)                                          AS total_trades,
+            SUM(CASE WHEN status != 'open' THEN 1 ELSE 0 END) AS closed_trades,
+            SUM(CASE WHEN status  = 'open' THEN 1 ELSE 0 END) AS open_trades,
+            SUM(CASE WHEN is_win = 1 THEN 1 ELSE 0 END)       AS win_count,
+            SUM(CASE WHEN status != 'open' AND is_win = 0 THEN 1 ELSE 0 END) AS loss_count,
+            SUM(CASE WHEN is_perfect_win = 1 THEN 1 ELSE 0 END) AS perfect_win_count,
+            SUM(CASE WHEN status = 'assigned' THEN 1 ELSE 0 END) AS assigned_count,
+            COALESCE(SUM(CASE WHEN status != 'open' THEN net_pnl ELSE 0 END), 0) AS total_pnl,
+            COALESCE(SUM(net_premium), 0)                      AS total_premium_collected,
+            COALESCE(SUM(CASE WHEN status = 'open' THEN net_premium ELSE 0 END), 0) AS open_premium
+        FROM income_trades {clause}
+    """, params)
+    row = dict(cur.fetchone())
+    conn.close()
+
+    closed = row["closed_trades"] or 0
+    row["win_rate"] = round(100 * (row["win_count"] or 0) / closed, 1) if closed else 0
+    row["perfect_win_rate"] = round(100 * (row["perfect_win_count"] or 0) / closed, 1) if closed else 0
+    row["avg_pnl_per_trade"] = round((row["total_pnl"] or 0) / closed, 2) if closed else 0
+    row["total_pnl"] = round(row["total_pnl"] or 0, 2)
+    row["total_premium_collected"] = round(row["total_premium_collected"] or 0, 2)
+    row["open_premium"] = round(row["open_premium"] or 0, 2)
+    row["last_synced"] = get_income_sync_time()
+    return row

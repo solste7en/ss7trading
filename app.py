@@ -16,8 +16,10 @@ from db import (
     get_transactions, get_realized_gains, get_top_tickers, suggest_position_unwind,
     get_watchlists, create_watchlist, delete_watchlist,
     get_watchlist_symbols, add_watchlist_symbol, remove_watchlist_symbol,
+    get_income_trades, get_income_stats,
 )
 from sync_trades import parse_schwab_transaction
+from income_sync import run_sync as run_income_sync
 
 # ── Schwab order API rate-limiter ──────────────────────────────────────────────
 # Schwab enforces a burst limit on order writes (place + cancel).
@@ -1206,6 +1208,49 @@ def api_strategy_suggest():
             "expirations": chain_data["expirations"],
             "suggestions": suggestions,
         })
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── Income Performance Tracking ────────────────────────────────────────────────
+
+_income_sync_lock = threading.Lock()
+
+@app.route("/api/income/sync", methods=["POST"])
+def api_income_sync():
+    """Trigger a full re-sync of income trades from Schwab API."""
+    if not _income_sync_lock.acquire(blocking=False):
+        return jsonify({"error": "Sync already in progress"}), 409
+    try:
+        result = run_income_sync()
+        return jsonify({"ok": True, **result})
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    finally:
+        _income_sync_lock.release()
+
+
+@app.route("/api/income/trades")
+def api_income_trades():
+    """Paginated income trades with optional filters."""
+    try:
+        page     = max(1, int(request.args.get("page", 1)))
+        limit    = min(100, max(10, int(request.args.get("limit", 25))))
+        ticker   = request.args.get("ticker", "").strip().upper()
+        status   = request.args.get("status", "").strip()
+        strategy = request.args.get("strategy", "").strip()
+        outcome  = request.args.get("outcome", "").strip()
+        return jsonify(get_income_trades(page, limit, ticker, status, strategy, outcome))
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/income/stats")
+def api_income_stats():
+    """Aggregate KPI stats for income trades."""
+    try:
+        ticker = request.args.get("ticker", "").strip().upper()
+        return jsonify(get_income_stats(ticker))
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 

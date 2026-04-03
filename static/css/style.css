@@ -418,6 +418,98 @@ tr:hover td { background: #1a1d2e; }
 .chain-page-btn:disabled { opacity: .35; cursor: default; }
 .chain-page-label { font-size: 11px; color: #64748b; min-width: 70px; text-align: center; }
 
+/* ── Income P&L tab ── */
+.ip-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
+}
+.ip-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ip-filters input, .ip-filters select {
+  background: #1a1d2e; border: 1px solid #2d3148; border-radius: 6px;
+  color: #e2e8f0; padding: 7px 10px; font-size: 12px; outline: none;
+}
+.ip-filters input:focus, .ip-filters select:focus { border-color: #6366f1; }
+.ip-filters input { width: 130px; text-transform: uppercase; }
+.ip-sync-area { display: flex; align-items: center; gap: 10px; }
+.ip-sync-time { font-size: 11px; color: #64748b; }
+.ip-sync-btn {
+  background: #312e81; color: #a5b4fc; border: 1px solid #4338ca;
+  border-radius: 6px; padding: 7px 16px; cursor: pointer; font-size: 12px;
+  font-weight: 500; display: flex; align-items: center; gap: 6px;
+  transition: background .15s;
+}
+.ip-sync-btn:hover:not(:disabled) { background: #3730a3; }
+.ip-sync-btn:disabled { opacity: .5; cursor: default; }
+.ip-spin { display: inline-block; animation: ipSpin 1s linear infinite; }
+@keyframes ipSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* KPI cards */
+.ip-kpi-row {
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+  margin-bottom: 18px;
+}
+@media (max-width: 900px) { .ip-kpi-row { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 540px) { .ip-kpi-row { grid-template-columns: repeat(2, 1fr); } }
+.ip-kpi-card {
+  background: #131621; border: 1px solid #1e2235; border-radius: 10px;
+  padding: 14px 16px; text-align: center;
+}
+.ip-kpi-clickable {
+  cursor: pointer; transition: border-color 0.15s, background 0.15s;
+}
+.ip-kpi-clickable:hover { border-color: #4f46e5; background: #161928; }
+.ip-kpi-clickable.active {
+  border-color: #6366f1; background: #1a1d35;
+  box-shadow: 0 0 0 1px #6366f1 inset;
+}
+.ip-kpi-clickable.active .ip-kpi-label { color: #a5b4fc; }
+.ip-kpi-label { font-size: 10px; color: #64748b; text-transform: uppercase;
+  letter-spacing: .05em; margin-bottom: 6px; }
+.ip-kpi-value { font-size: 20px; font-weight: 700; color: #e2e8f0; }
+.ip-kpi-value.pos { color: #4ade80; }
+.ip-kpi-value.neg { color: #f87171; }
+
+/* Trade table */
+#ip-tbl { width: 100%; border-collapse: collapse; }
+#ip-tbl th { font-size: 10px; color: #64748b; text-transform: uppercase;
+  letter-spacing: .04em; padding: 7px 8px; border-bottom: 1px solid #1e2235;
+  white-space: nowrap; text-align: left; }
+#ip-tbl td { padding: 6px 8px; font-size: 12px; border-bottom: 1px solid #1a1d2e;
+  white-space: nowrap; }
+.ip-trade-row:hover { background: #1a1d2e; }
+.ip-toggle-arrow { color: #475569; font-size: 10px; width: 20px; }
+.ip-legs-cell { color: #94a3b8; font-size: 11px; max-width: 200px;
+  overflow: hidden; text-overflow: ellipsis; }
+.ip-leg-row { background: #0c0e17; }
+.ip-leg-row td { border-bottom: 1px solid #151825; }
+
+/* Strategy badges */
+.ip-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.ip-badge-naked  { background: #312e81; color: #a5b4fc; }
+.ip-badge-spread { background: #1e3a5f; color: #7dd3fc; }
+.ip-badge-collar { background: #164e45; color: #5eead4; }
+.ip-badge-other  { background: #27272a; color: #a1a1aa; }
+
+/* Status badges */
+.ip-status-open     { background: #1e3a5f; color: #7dd3fc; }
+.ip-status-closed   { background: #1a2e1a; color: #86efac; }
+.ip-status-expired  { background: #14532d; color: #4ade80; }
+.ip-status-assigned { background: #451a03; color: #fdba74; }
+
+/* Outcome badges */
+.ip-outcome-win     { background: #14532d; color: #4ade80; }
+.ip-outcome-perfect { background: #052e16; color: #22c55e; border: 1px solid #16a34a; }
+.ip-outcome-loss    { background: #450a0a; color: #f87171; }
+.ip-outcome-open    { background: #27272a; color: #a1a1aa; }
+
+/* P&L coloring in table */
+#ip-tbl .pos { color: #4ade80; }
+#ip-tbl .neg { color: #f87171; }
+
 /* ── Strategy tab ── */
 .strat-layout { display: grid; grid-template-columns: minmax(320px, 1fr) 520px; gap: 16px; }
 @media (max-width: 1080px) { .strat-layout { grid-template-columns: 1fr; } }
