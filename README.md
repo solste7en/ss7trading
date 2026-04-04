@@ -2,7 +2,7 @@
 
 A personal trading dashboard and order management tool built on the Schwab API. Tracks positions and trade history, syncs transactions to a local SQLite database, and supports order entry — including ladder orders and multi-leg options strategies — directly from the browser.
 
-**Current version: 0.1.5**
+**Current version: 0.2.0**
 
 ---
 
@@ -58,13 +58,14 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 | Tab | Description |
 |-----|-------------|
 | **Overview** | Top 10 most-traded tickers with recent equity trades, paginated; custom ticker lookup with options toggle |
-| **Positions** | Live positions with market value, current price, unrealized P&L, and day P&L; sortable columns; ETF badge |
+| **Positions** | Live positions with market value, current price, unrealized P&L, and day P&L; sortable columns; ETF badge; options grouped under underlying with expand/collapse; PUT/CALL type and expiry columns |
 | **Quote** | Live quote for any symbol + quotes for held positions or custom watchlists (saved to DB) |
 | **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword |
 | **Realized G/L** | Closed-position gain/loss, filterable by ticker and short/long term |
+| **📊 Income P&L** | Option income strategy performance tracker: clickable KPI cards, paginated trade table with expandable leg detail, filters by ticker/status/strategy/outcome; "Sync from Schwab" rebuilds from API |
 | **Trade** | Place equity/ETF or single-leg option orders; live quote card, TradingView chart, option chain browser (click-to-fill), and current holdings panel |
 | **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); position unwind suggestion engine; current holdings panel + recent trades/open orders sidebar |
-| **Income** | Multi-leg options strategies: naked option, vertical spread, collar, equity+option bundle; suggestion engine with clickable cards pre-filled from current positions and option chain; live P&L preview (max profit/loss, breakeven); option chain browser; recent trades and open orders sidebar |
+| **💰 Income** | Multi-leg options strategies: naked option, vertical spread, collar, equity+option bundle; suggestion engine with clickable cards; live P&L preview; paginated option chain (20 strikes/page) with strike dropdowns auto-filled from bid/ask |
 | **Open Orders** | All working/queued orders with sortable columns, filters, and cancel buttons |
 
 ---
@@ -88,7 +89,7 @@ The **Ladder** tab lets you submit multiple limit orders at different price leve
 
 The sidebar also shows recent trades (equity + options with strike/expiry) for the selected ticker, paginated 20 per page, and all open orders for that ticker.
 
-## Income tab (multi-leg options strategies)
+## 💰 Income tab (multi-leg options strategies)
 
 The **Income** tab is designed for generating income using options against existing equity positions, exiting at better prices, and creating costless downside protection via collars.
 
@@ -103,9 +104,34 @@ The **Income** tab is designed for generating income using options against exist
 
 1. Enter a ticker — the **suggestion engine** immediately analyses your current position and the option chain, returning ranked strategy cards (covered calls with annualized yield, collar candidates, spread structures)
 2. Click any suggestion card to pre-fill the form with recommended strikes, expiry, and quantity
-3. Browse the inline **option chain** and click any row to adjust strikes
+3. Browse the inline **option chain** (paginated, 20 strikes/page, centered on ATM) and use **strike dropdowns** — selecting a strike auto-fills the net credit/debit from bid/ask
 4. The **P&L preview panel** updates live as you adjust parameters — shows max profit, max loss, breakeven(s), and net credit/debit
 5. **Preview** → **Confirm** submits via `POST /api/order/strategy`
+
+## 📊 Income P&L tab (income strategy performance tracker)
+
+Tracks the full history of option income trades since 2026-01-01, grouped by strategy and linked to their open/close legs.
+
+**How it works:**
+
+1. Click **Sync from Schwab** to fetch all 2026 option transactions fresh from the Schwab API
+2. The sync engine builds a FIFO-matched ledger: each STO/BTO opening leg is paired with its BTC/STC/Expired/Assigned closing leg
+3. Matched legs are grouped into trades by strategy type (naked, spread, collar)
+4. Assignment detection: the Schwab API marks assigned options as "Expired"; the sync cross-references equity TRADE events at the strike price to correctly reclassify them
+5. P&L is calculated: net premium collected, close cost (BTC price or assignment intrinsic value), fees, net P&L, and win/perfect-win classification
+
+**KPI cards** (5 are clickable — click to filter the table; click again to deselect):
+
+- **Total Net P&L** — aggregate net P&L across all filtered trades
+- **Win Rate** — percentage of closed trades with net P&L > 0
+- **Perfect Win Rate** — percentage where the short option expired nearly worthless (close cost < 3% of original premium)
+- **Closed Trades** / **Open Trades** / **Assigned** — trade counts by status
+
+**Trade table:**
+
+- Expandable rows — click any row to show individual leg detail (strike, expiry, direction, open/close action and price, dates)
+- Filters: ticker, status (Open / Closed / Expired / Assigned), strategy (Naked / Spread / Collar), page size
+- Strategy, status, and outcome badges with distinct colors
 
 ---
 
@@ -150,6 +176,9 @@ python3 sync_trades.py --dry-run    # preview without writing
 | `/api/watchlists/<id>/symbols` | GET/POST | List symbols in a watchlist / add a symbol |
 | `/api/watchlists/<id>/symbols/<sym>` | DELETE | Remove a symbol from a watchlist |
 | `/api/quotes/list/<id>` | GET | Live quotes for all symbols in a watchlist |
+| `/api/income/sync` | POST | Trigger full re-sync of income trades from Schwab API |
+| `/api/income/trades` | GET | Paginated income trades (filters: ticker, status, strategy, outcome) |
+| `/api/income/stats` | GET | Aggregate KPI stats for income trades |
 | `/api/test` | GET | Connectivity test |
 
 ---
@@ -159,12 +188,13 @@ python3 sync_trades.py --dry-run    # preview without writing
 | File | Purpose |
 |------|---------|
 | `app.py` | Flask app — API routes and dashboard serving |
-| `db.py` | Database access layer (transactions, gains, top tickers) |
+| `db.py` | Database access layer (transactions, gains, watchlists, income trades) |
 | `auth.py` | OAuth setup (run once for first-time login) |
 | `config.py` | Loads credentials from `.env` |
 | `sync_trades.py` | Schwab API → `trades.db` sync script |
+| `income_sync.py` | Income trade sync: FIFO matching, strategy grouping, P&L calculation |
 | `templates/dashboard.html` | Dashboard HTML template |
 | `static/css/style.css` | Dashboard styles |
 | `static/js/dashboard.js` | Dashboard client-side logic |
 | `requirements.txt` | Python dependencies |
-| `../trades.db` | SQLite database (transactions and realized G/L) |
+| `../trades.db` | SQLite database (transactions, realized G/L, income trades) |

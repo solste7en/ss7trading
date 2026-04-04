@@ -4,6 +4,64 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [0.2.0] — 2026-04-04
+
+Major feature release. Introduces the **Income P&L tab** — a full option income strategy performance tracker backed by a new SQLite schema and sync engine. Also enriches the Positions tab with option grouping and expiry display, and upgrades the Income tab with a paginated option chain and dynamic strike dropdowns.
+
+### New: Income P&L tab (Records group)
+
+A new **📊 Income P&L** tab added to the Records group (**Trade History | Realized G/L | Income P&L**) for tracking the performance of all option income strategies written since 2026-01-01.
+
+**Data model (3 new SQLite tables):**
+
+- `income_trades` — one row per identified income trade (underlying, strategy, open/close dates, net premium, close cost, net P&L, win/perfect-win flags, assignment stock price, dedup key)
+- `income_trade_legs` — individual option legs linked to each trade (strike, expiry, direction, open/close action, prices, dates)
+- `income_sync_meta` — stores the timestamp of the last successful sync
+
+**Sync engine (`income_sync.py`):**
+
+- "Sync from Schwab" button triggers `POST /api/income/sync`, which calls the Schwab API for all transactions since 2026-01-01 and rebuilds the tables from scratch (thread-safe; rejects concurrent sync requests with HTTP 409)
+- **Assignment detection fix**: Schwab's API labels assigned options as `"Expired"` (with `netAmount = null`) and generates a separate equity TRADE at the strike price. The sync engine cross-references all equity TRADE events against each `"Expired"` option event — if an equity buy/sell at the exact strike price exists within 5 days of the option's expiry, the event is reclassified as `"Assigned"` before FIFO matching. Validated against 12/12 assignment events across NVDA, LUV, HUT, PRLB, SPOT, TSLA, PTON
+- **FIFO matching**: opening legs (STO/BTO) are matched to closing legs (BTC/STC/Expired/Assigned) per position key `(underlying, type, strike, expiry)` using first-in-first-out order
+- **Strategy grouping**: matched legs are grouped into trades — naked put/call (lone STO), vertical spread (STO + BTO same type, same expiry), collar (STO + BTO opposite type, same expiry); standalone long legs excluded
+- **Assignment P&L**: for assigned legs, the closing cost is the intrinsic value at assignment — `max(0, K − S)` for short puts, `max(0, S − K)` for short calls — looked up from `get_price_history_every_day` for the stock closing price on the assignment date
+- **Win / Perfect-win classification**: a trade is a win if `net_pnl > 0`; a "perfect win" if the short option expired with close cost < 3% of original sell premium (threshold configurable via `PERFECT_WIN_THRESHOLD`)
+
+**New API endpoints:**
+
+- `POST /api/income/sync` — triggers full re-sync; returns count of trades written
+- `GET /api/income/trades` — paginated income trades with filters: `ticker`, `status`, `strategy`, `outcome` (win / perfect / assigned / open / closed), `page`, `limit`
+- `GET /api/income/stats` — aggregate KPIs filtered by optional `ticker`
+
+**UI:**
+
+- Toolbar with ticker filter, status dropdown (All / Open / Closed / Expired / Assigned), strategy dropdown (All / Naked / Spread / Collar), page-size selector, sync button with last-sync timestamp
+- Six KPI cards at the top: **Total Net P&L**, **Win Rate**, **Perfect Win Rate**, **Closed Trades**, **Open Trades**, **Assigned** — the five non-P&L cards are **clickable** to filter the table to that subset; clicking again deselects
+- Trade table with expandable rows: click any row to reveal individual leg detail (strike, expiry, direction, open/close action, prices, dates)
+- Strategy, status, and outcome badges with distinct colors per type
+- Pagination shared with the existing generic `renderPagination` helper
+
+---
+
+### Positions tab: options grouping and expiry display
+
+- **Options grouped under underlying equity**: option positions are hidden by default and can be expanded/collapsed by clicking the underlying equity row (triangle toggle)
+- **PUT / CALL badge column** added for option rows
+- **Expiration date column** for options: extracted from the 21-character OCC symbol (`NVDA  260410P00170000` → `Apr 10 '26`) and displayed in a separate column
+- **Sort by expiry**: option rows within a group are sorted by expiration date
+- **Unrealized P&L for short positions** now correctly reads `shortOpenProfitLoss` instead of always using the long field
+
+---
+
+### Income tab: paginated option chain and strike dropdowns
+
+- **Option chain pagination**: chain loads 60 strikes, displays 20 at a time centred on the current price; Previous / Next buttons navigate pages; page label shows current position (e.g. `Page 2 / 3`)
+- **Strike price dropdowns**: all six strike inputs across the four strategy forms (Naked, Spread, Collar, Bundle) replaced with `<select>` elements populated with the 20 currently visible strikes, each option showing the strike and its bid/ask; dropdowns update automatically when the chain page changes
+- **Auto-fill net credit/debit**: selecting a strike immediately calculates and fills the net credit/debit field from the option's bid/ask (correct bid vs ask logic per leg direction)
+- **Income tab emoji** 💰 added to the tab button
+
+---
+
 ## [0.1.5] — 2026-04-02
 
 Major feature release. Introduces the **Income tab** for advanced multi-leg options strategies, enriches the Positions tab, adds watchlist management to the Quote tab, and fixes several usability issues.
