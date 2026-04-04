@@ -183,14 +183,14 @@
     <div class="ip-filters">
       <input type="text" id="ip-ticker" placeholder="Ticker (e.g. NVDA)"
              oninput="debounce(function(){ loadIncomeStats(); loadIncomeTrades(); })">
-      <select id="ip-status" onchange="_ipCardFilter=null; document.querySelectorAll('.ip-kpi-clickable').forEach(e=>e.classList.remove('active')); loadIncomeTrades()">
+      <select id="ip-status" onchange="_ipOnStatusChange()">
         <option value="">All Status</option>
         <option value="open">Open</option>
         <option value="closed">Closed</option>
         <option value="expired">Expired</option>
         <option value="assigned">Assigned</option>
       </select>
-      <select id="ip-strategy" onchange="_ipCardFilter=null; document.querySelectorAll('.ip-kpi-clickable').forEach(e=>e.classList.remove('active')); loadIncomeTrades()">
+      <select id="ip-strategy" onchange="_ipCardFilter=null; document.querySelectorAll('.ip-kpi-clickable').forEach(e=>e.classList.remove('active')); loadIncomeStats(); loadIncomeTrades()">
         <option value="">All Strategies</option>
         <option value="naked">Naked Options</option>
         <option value="spread">Spreads</option>
@@ -215,6 +215,10 @@
     <div class="ip-kpi-card">
       <div class="ip-kpi-label">Total Net P&amp;L</div>
       <div class="ip-kpi-value" id="ip-kpi-pnl">—</div>
+    </div>
+    <div class="ip-kpi-card">
+      <div class="ip-kpi-label">Recovery Net P&amp;L</div>
+      <div class="ip-kpi-value" id="ip-kpi-recovery-pnl">—</div>
     </div>
     <div class="ip-kpi-card ip-kpi-clickable" id="ip-kpi-card-win" onclick="setIpCardFilter('win')">
       <div class="ip-kpi-label">Win Rate</div>
@@ -248,12 +252,14 @@
       <th>Ticker</th>
       <th>Strategy</th>
       <th>Legs</th>
-      <th>Open</th>
-      <th>Close</th>
-      <th>Days</th>
-      <th>Premium</th>
+      <th class="sortable ip-sortable" onclick="setIncomePnlSort('recovery')">Recovery <span class="sort-arrow" id="ip-sa-recovery"></span></th>
+      <th class="sortable ip-sortable" onclick="setIncomePnlSort('recovery_pnl')">Rec. P&amp;L <span class="sort-arrow" id="ip-sa-recovery_pnl"></span></th>
+      <th class="sortable ip-sortable" onclick="setIncomePnlSort('open_date')">Open <span class="sort-arrow" id="ip-sa-open_date"></span></th>
+      <th class="sortable ip-sortable" onclick="setIncomePnlSort('close_date')">Close <span class="sort-arrow" id="ip-sa-close_date"></span></th>
+      <th class="sortable ip-sortable" onclick="setIncomePnlSort('days_held')">Days <span class="sort-arrow" id="ip-sa-days_held"></span></th>
+      <th class="sortable ip-sortable" onclick="setIncomePnlSort('net_premium')">Premium <span class="sort-arrow" id="ip-sa-net_premium"></span></th>
       <th>Close Cost</th>
-      <th>Net P&amp;L</th>
+      <th class="sortable ip-sortable" onclick="setIncomePnlSort('net_pnl')">Net P&amp;L <span class="sort-arrow" id="ip-sa-net_pnl"></span></th>
       <th>P&amp;L %</th>
       <th>Status</th>
       <th>Outcome</th>

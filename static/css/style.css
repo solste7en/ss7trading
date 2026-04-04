@@ -445,9 +445,10 @@ tr:hover td { background: #1a1d2e; }
 
 /* KPI cards */
 .ip-kpi-row {
-  display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
   margin-bottom: 18px;
 }
+@media (min-width: 1200px) { .ip-kpi-row { grid-template-columns: repeat(8, 1fr); } }
 @media (max-width: 900px) { .ip-kpi-row { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 540px) { .ip-kpi-row { grid-template-columns: repeat(2, 1fr); } }
 .ip-kpi-card {
@@ -474,6 +475,10 @@ tr:hover td { background: #1a1d2e; }
 #ip-tbl th { font-size: 10px; color: #64748b; text-transform: uppercase;
   letter-spacing: .04em; padding: 7px 8px; border-bottom: 1px solid #1e2235;
   white-space: nowrap; text-align: left; }
+#ip-tbl th.ip-sortable { cursor: pointer; user-select: none; }
+#ip-tbl th.ip-sortable:hover { color: #a78bfa; }
+#ip-tbl .sort-arrow { font-size: 9px; margin-left: 2px; color: #a78bfa; }
+#ip-tbl .ip-recovery-cell, #ip-tbl .ip-recovery-pnl-cell { font-size: 11px; color: #94a3b8; }
 #ip-tbl td { padding: 6px 8px; font-size: 12px; border-bottom: 1px solid #1a1d2e;
   white-space: nowrap; }
 .ip-trade-row:hover { background: #1a1d2e; }
@@ -509,6 +514,41 @@ tr:hover td { background: #1a1d2e; }
 /* P&L coloring in table */
 #ip-tbl .pos { color: #4ade80; }
 #ip-tbl .neg { color: #f87171; }
+
+/* Recovery tracking */
+.ip-recovery-header td { border-bottom: none !important; }
+.ip-recovery-summary {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-size: 11px; margin-bottom: 5px;
+}
+.ip-recovery-title {
+  font-weight: 700; color: #a78bfa; text-transform: uppercase;
+  font-size: 10px; letter-spacing: .05em;
+}
+.ip-recovery-progress-text { color: #cbd5e1; font-weight: 600; }
+.ip-recovery-pnl { font-weight: 700; }
+.ip-recovery-remain { color: #fbbf24; font-size: 10px; }
+.ip-recovery-dismissed { color: #64748b; font-size: 10px; font-style: italic; }
+.ip-recovery-done {
+  background: #052e16; color: #22c55e; border: 1px solid #16a34a;
+  font-size: 9px; padding: 1px 6px; border-radius: 4px;
+}
+.ip-recovery-bar-bg {
+  height: 4px; background: #1e293b; border-radius: 2px; overflow: hidden;
+  max-width: 260px;
+}
+.ip-recovery-bar-fill {
+  height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  border-radius: 2px; transition: width .3s ease;
+}
+.ip-recovery-closeout {
+  background: #2d1b4e; color: #c4b5fd; border: 1px solid #5b21b6;
+  font-size: 10px; padding: 2px 8px; border-radius: 4px;
+  cursor: pointer; white-space: nowrap;
+}
+.ip-recovery-closeout:hover { background: #3b1f6e; border-color: #7c3aed; }
+.ip-recovery-row { background: #0a0c14; }
+.ip-recovery-row td { border-bottom: 1px solid #111425 !important; }
 
 /* ── Strategy tab ── */
 .strat-layout { display: grid; grid-template-columns: minmax(320px, 1fr) 520px; gap: 16px; }

@@ -697,26 +697,90 @@ function renderPagination(containerId, res, loadFn, stateObj, fnName) {
 const incomePnlState = { page: 1, loaded: false };
 const _ipExpanded = new Set();
 let _ipCardFilter = null;   // 'win' | 'perfect' | 'closed' | 'open' | 'assigned' | null
+const _ipRecoveryCache = {};  // ticker -> {assignments: [...]}
+let incomePnlSort = { key: 'open_date', dir: 'desc' };
+
+function _ipFormatStrike(s) {
+  if (s == null || s === '') return '0';
+  const n = Number(s);
+  if (Number.isNaN(n)) return String(s);
+  return n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function setIncomePnlSort(key) {
+  if (incomePnlSort.key === key) {
+    incomePnlSort.dir = incomePnlSort.dir === 'desc' ? 'asc' : 'desc';
+  } else {
+    incomePnlSort.key = key;
+    incomePnlSort.dir = 'desc';
+  }
+  _updateIpSortArrows();
+  loadIncomeTrades(true);
+}
+
+function _updateIpSortArrows() {
+  const keys = ['open_date', 'close_date', 'recovery', 'recovery_pnl', 'net_pnl', 'days_held', 'net_premium'];
+  for (const k of keys) {
+    const el = document.getElementById('ip-sa-' + k);
+    if (!el) continue;
+    el.textContent = incomePnlSort.key === k ? (incomePnlSort.dir === 'desc' ? '▼' : '▲') : '';
+  }
+}
+
+async function _fetchRecovery(ticker) {
+  if (_ipRecoveryCache[ticker]) return _ipRecoveryCache[ticker];
+  try {
+    const res = await fetch('/api/income/recovery?ticker=' + encodeURIComponent(ticker)).then(r => r.json());
+    if (!res.error) _ipRecoveryCache[ticker] = res;
+    return res;
+  } catch (e) { console.error('Recovery fetch error:', e); return null; }
+}
+
+function _getRecoveryForTrade(ticker, tradeId) {
+  const cached = _ipRecoveryCache[ticker];
+  if (!cached) return null;
+  return (cached.assignments || []).find(a => a.trade_id === tradeId) || null;
+}
+
+function _ipOnStatusChange() {
+  _ipCardFilter = null;
+  document.querySelectorAll('.ip-kpi-clickable').forEach(e => e.classList.remove('active'));
+  const st = document.getElementById('ip-status').value;
+  if (st === 'assigned') {
+    incomePnlSort = { key: 'close_date', dir: 'desc' };
+  }
+  loadIncomeStats();
+  loadIncomeTrades();
+}
 
 function setIpCardFilter(filter) {
   if (_ipCardFilter === filter) {
     _ipCardFilter = null;   // toggle off
   } else {
     _ipCardFilter = filter;
+    if (filter === 'assigned') {
+      incomePnlSort = { key: 'close_date', dir: 'desc' };
+    }
   }
   // Update card active states
   ['win', 'perfect', 'closed', 'open', 'assigned'].forEach(f => {
     const el = document.getElementById('ip-kpi-card-' + f);
     if (el) el.classList.toggle('active', _ipCardFilter === f);
   });
+  loadIncomeStats();
   loadIncomeTrades(true);
 }
 
 async function loadIncomeStats() {
   const ticker = document.getElementById('ip-ticker').value.trim().toUpperCase();
+  const status = document.getElementById('ip-status').value;
+  const strategy = document.getElementById('ip-strategy').value;
   try {
     const params = new URLSearchParams();
     if (ticker) params.set('ticker', ticker);
+    if (status) params.set('status', status);
+    if (strategy) params.set('strategy', strategy);
+    if (_ipCardFilter) params.set('outcome', _ipCardFilter);
     const data = await fetch('/api/income/stats?' + params).then(r => r.json());
     if (data.error) throw new Error(data.error);
 
@@ -724,6 +788,11 @@ async function loadIncomeStats() {
     const pnlEl = document.getElementById('ip-kpi-pnl');
     pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
     pnlEl.className = 'ip-kpi-value ' + (pnl >= 0 ? 'pos' : 'neg');
+
+    const rpnl = data.total_recovery_pnl != null ? data.total_recovery_pnl : 0;
+    const rEl = document.getElementById('ip-kpi-recovery-pnl');
+    rEl.textContent = (rpnl >= 0 ? '+' : '') + '$' + rpnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    rEl.className = 'ip-kpi-value ' + (rpnl >= 0 ? 'pos' : 'neg');
 
     document.getElementById('ip-kpi-winrate').textContent = (data.win_rate || 0) + '%';
     document.getElementById('ip-kpi-perfect').textContent = (data.perfect_win_rate || 0) + '%';
@@ -755,7 +824,8 @@ async function loadIncomeTrades(resetPage = true) {
 
   try {
     const params = new URLSearchParams({
-      page: incomePnlState.page, limit, ticker, status, strategy
+      page: incomePnlState.page, limit, ticker, status, strategy,
+      sort_by: incomePnlSort.key, sort_dir: incomePnlSort.dir
     });
     if (_ipCardFilter) params.set('outcome', _ipCardFilter);
     const res = await fetch('/api/income/trades?' + params).then(r => r.json());
@@ -766,7 +836,11 @@ async function loadIncomeTrades(resetPage = true) {
     document.getElementById('ip-table').style.display = '';
     document.getElementById('ip-count').textContent = res.total + ' trades';
 
+    const tickersNeedRec = [...new Set((res.data || []).filter(t => t.status === 'assigned').map(t => t.underlying))];
+    await Promise.all(tickersNeedRec.map(u => _fetchRecovery(u)));
+
     _renderIncomeTrades(res.data);
+    _updateIpSortArrows();
     renderPagination('ip-pagination', res, loadIncomeTrades, incomePnlState);
   } catch (e) {
     document.getElementById('ip-loading').style.display = 'none';
@@ -786,7 +860,7 @@ function _renderIncomeTrades(trades) {
 
     const legsSummary = legs.map(l => {
       const dir = l.direction === 'short' ? 'STO' : 'BTO';
-      return dir + ' $' + (l.strike || 0).toFixed(0) + (l.leg_type === 'PUT' ? 'P' : 'C');
+      return dir + ' $' + _ipFormatStrike(l.strike) + (l.leg_type === 'PUT' ? 'P' : 'C');
     }).join(' / ');
 
     const stratBadge = _ipStratBadge(t.strategy);
@@ -801,11 +875,23 @@ function _renderIncomeTrades(trades) {
     const closeStr = t.close_cost != null && t.status !== 'open' ? '$' + t.close_cost.toFixed(2) : '—';
     const arrow = hasLegs ? (isExpanded ? '▼' : '▶') : '';
 
-    html += `<tr class="ip-trade-row" onclick="toggleIncomeTrade(${t.id})" style="cursor:pointer">
+    let recCell = '—';
+    let recPnlCell = '—';
+    if (t.status === 'assigned' && t.recovery_target != null && t.recovery_target > 0) {
+      recCell = (t.recovery_recovered != null ? t.recovery_recovered : 0) + '/' + t.recovery_target;
+      if (t.recovery_pnl != null) {
+        const rc = t.recovery_pnl >= 0 ? 'pos' : 'neg';
+        recPnlCell = `<span class="${rc}">` + (t.recovery_pnl >= 0 ? '+' : '') + '$' + t.recovery_pnl.toFixed(2) + '</span>';
+      }
+    }
+
+    html += `<tr class="ip-trade-row" onclick="toggleIncomeTrade(${t.id},'${esc(t.underlying)}','${esc(t.status)}')" style="cursor:pointer">
       <td class="ip-toggle-arrow">${arrow}</td>
       <td><b>${esc(t.underlying)}</b></td>
       <td>${stratBadge}</td>
       <td class="ip-legs-cell">${esc(legsSummary)}</td>
+      <td class="ip-recovery-cell">${t.status === 'assigned' ? recCell : '—'}</td>
+      <td class="ip-recovery-pnl-cell">${t.status === 'assigned' ? recPnlCell : '—'}</td>
       <td>${t.open_date || '—'}</td>
       <td>${t.close_date || '—'}</td>
       <td>${t.days_held != null ? t.days_held : '—'}</td>
@@ -825,9 +911,10 @@ function _renderIncomeTrades(trades) {
         html += `<tr class="ip-leg-row">
           <td></td>
           <td colspan="2" style="padding-left:24px;color:#94a3b8;font-size:11px">
-            ${lDir} ${l.leg_type} $${(l.strike||0).toFixed(2)} exp ${l.expiry || '?'}
+            ${lDir} ${l.leg_type} $${_ipFormatStrike(l.strike)} exp ${l.expiry || '?'}
           </td>
           <td style="font-size:11px;color:#94a3b8">${esc(l.open_action||'')} → ${esc(l.close_action||'open')}</td>
+          <td></td><td></td>
           <td style="font-size:11px">${l.open_date||'—'}</td>
           <td style="font-size:11px">${l.close_date||'—'}</td>
           <td></td>
@@ -837,15 +924,48 @@ function _renderIncomeTrades(trades) {
           <td colspan="3"></td>
         </tr>`;
       }
+      // Recovery section for assigned trades
+      if (t.status === 'assigned') {
+        const rec = _getRecoveryForTrade(t.underlying, t.id);
+        if (rec) {
+          html += _renderRecoverySection(rec, t.underlying);
+        } else {
+          html += `<tr class="ip-recovery-header"><td></td>
+            <td colspan="14" style="padding:8px 24px;color:#64748b;font-size:11px;font-style:italic">
+              Loading recovery data…</td></tr>`;
+        }
+      }
     }
   }
   tbody.innerHTML = html;
 }
 
-function toggleIncomeTrade(id) {
-  if (_ipExpanded.has(id)) _ipExpanded.delete(id);
-  else _ipExpanded.add(id);
+async function toggleIncomeTrade(id, ticker, status) {
+  if (_ipExpanded.has(id)) {
+    _ipExpanded.delete(id);
+  } else {
+    _ipExpanded.add(id);
+    if (status === 'assigned' && ticker && !_ipRecoveryCache[ticker]) {
+      await _fetchRecovery(ticker);
+    }
+  }
   loadIncomeTrades(false);
+}
+
+async function dismissRecovery(tradeId, ticker, remainingQty) {
+  if (!confirm('Write off the remaining ' + remainingQty + ' shares? This marks the recovery as complete.')) return;
+  try {
+    const res = await fetch('/api/income/recovery/' + tradeId + '/dismiss', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({qty: remainingQty})
+    }).then(r => r.json());
+    if (res.error) { alert('Error: ' + res.error); return; }
+    delete _ipRecoveryCache[ticker];
+    await _fetchRecovery(ticker);
+    loadIncomeStats();
+    loadIncomeTrades(false);
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 function _ipStratBadge(strategy) {
@@ -878,6 +998,61 @@ function _ipOutcomeBadge(t) {
   return '<span class="ip-badge ip-outcome-loss">Loss</span>';
 }
 
+function _renderRecoverySection(rec, ticker) {
+  const total = rec.assigned_qty;
+  const recovered = rec.recovered_qty || 0;
+  const dismissed = rec.dismissed_qty || 0;
+  const effectiveTarget = total - dismissed;
+  const pct = effectiveTarget > 0 ? Math.min(100, Math.round(100 * recovered / effectiveTarget)) : 100;
+  const remaining = rec.remaining_qty || 0;
+  const pnl = rec.recovery_pnl || 0;
+  const pnlClass = pnl >= 0 ? 'pos' : 'neg';
+  const pnlStr = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+  const isComplete = rec.is_complete;
+  const trades = rec.recovery_trades || [];
+
+  let html = '';
+
+  // Header row with progress bar
+  const statusLabel = isComplete
+    ? '<span class="ip-badge ip-recovery-done">Recovered</span>'
+    : `<span class="ip-recovery-remain">${remaining} remaining</span>`;
+  const dismissedLabel = dismissed > 0 ? ` <span class="ip-recovery-dismissed">(${dismissed} written off)</span>` : '';
+
+  html += `<tr class="ip-recovery-header"><td></td>
+    <td colspan="14" style="padding:6px 24px">
+      <div class="ip-recovery-summary">
+        <span class="ip-recovery-title">Recovery</span>
+        <span class="ip-recovery-progress-text">${recovered} / ${effectiveTarget} shares (${pct}%)</span>
+        ${dismissedLabel}
+        <span class="ip-recovery-pnl ${pnlClass}">${pnlStr}</span>
+        ${statusLabel}
+        ${!isComplete && remaining > 0 ? `<button class="ip-recovery-closeout" onclick="event.stopPropagation(); dismissRecovery(${rec.trade_id},'${esc(ticker)}',${remaining + dismissed})">Close Out</button>` : ''}
+      </div>
+      <div class="ip-recovery-bar-bg"><div class="ip-recovery-bar-fill" style="width:${pct}%"></div></div>
+    </td></tr>`;
+
+  // Individual recovery trades
+  for (const rt of trades) {
+    const rtPnlClass = rt.pnl >= 0 ? 'pos' : 'neg';
+    const rtPnlStr = (rt.pnl >= 0 ? '+' : '') + '$' + rt.pnl.toFixed(2);
+    html += `<tr class="ip-recovery-row"><td></td>
+      <td colspan="2" style="padding-left:36px;font-size:11px;color:#94a3b8">
+        ${esc(rt.action)} ${rt.qty} shares @ $${rt.price.toFixed(2)}
+      </td>
+      <td style="font-size:11px;color:#64748b">vs strike $${_ipFormatStrike(rec.strike)}</td>
+      <td></td><td></td>
+      <td style="font-size:11px">${rt.date}</td>
+      <td colspan="4"></td>
+      <td class="${rtPnlClass}" style="font-size:11px">${rtPnlStr}</td>
+      <td style="font-size:11px;color:#64748b">${rt.pnl_per_share >= 0 ? '+' : ''}$${rt.pnl_per_share.toFixed(2)}/sh</td>
+      <td colspan="2"></td>
+    </tr>`;
+  }
+
+  return html;
+}
+
 async function syncIncome() {
   const btn = document.getElementById('ip-sync-btn');
   const icon = document.getElementById('ip-sync-icon');
@@ -888,6 +1063,7 @@ async function syncIncome() {
   try {
     const res = await fetch('/api/income/sync', { method: 'POST' }).then(r => r.json());
     if (res.error) throw new Error(res.error);
+    Object.keys(_ipRecoveryCache).forEach(k => delete _ipRecoveryCache[k]);
     loadIncomeStats();
     loadIncomeTrades();
   } catch (e) {

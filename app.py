@@ -16,10 +16,11 @@ from db import (
     get_transactions, get_realized_gains, get_top_tickers, suggest_position_unwind,
     get_watchlists, create_watchlist, delete_watchlist,
     get_watchlist_symbols, add_watchlist_symbol, remove_watchlist_symbol,
-    get_income_trades, get_income_stats,
+    get_income_trades, get_income_stats, dismiss_recovery,
 )
 from sync_trades import parse_schwab_transaction
 from income_sync import run_sync as run_income_sync
+from recovery import compute_recovery, sum_recovery_pnl_filtered, attach_recovery_summaries
 
 # ── Schwab order API rate-limiter ──────────────────────────────────────────────
 # Schwab enforces a burst limit on order writes (place + cancel).
@@ -1240,7 +1241,11 @@ def api_income_trades():
         status   = request.args.get("status", "").strip()
         strategy = request.args.get("strategy", "").strip()
         outcome  = request.args.get("outcome", "").strip()
-        return jsonify(get_income_trades(page, limit, ticker, status, strategy, outcome))
+        sort_by  = request.args.get("sort_by", "open_date").strip()
+        sort_dir = request.args.get("sort_dir", "desc").strip()
+        data = get_income_trades(page, limit, ticker, status, strategy, outcome, sort_by, sort_dir)
+        attach_recovery_summaries(data["data"])
+        return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
@@ -1249,8 +1254,41 @@ def api_income_trades():
 def api_income_stats():
     """Aggregate KPI stats for income trades."""
     try:
+        ticker   = request.args.get("ticker", "").strip().upper()
+        status   = request.args.get("status", "").strip()
+        strategy = request.args.get("strategy", "").strip()
+        outcome  = request.args.get("outcome", "").strip()
+        stats = get_income_stats(ticker, status, strategy, outcome)
+        stats["total_recovery_pnl"] = sum_recovery_pnl_filtered(ticker, status, strategy, outcome)
+        return jsonify(stats)
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── Assignment Recovery ─────────────────────────────────────────────────────────
+
+@app.route("/api/income/recovery")
+def api_income_recovery():
+    """Recovery progress for all assigned trades of a ticker."""
+    try:
         ticker = request.args.get("ticker", "").strip().upper()
-        return jsonify(get_income_stats(ticker))
+        if not ticker:
+            return jsonify({"error": "ticker is required"}), 400
+        return jsonify(compute_recovery(ticker))
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/income/recovery/<int:trade_id>/dismiss", methods=["POST"])
+def api_income_recovery_dismiss(trade_id):
+    """Write off remaining unrecovered shares for an assigned trade."""
+    try:
+        body = request.get_json(force=True) or {}
+        qty = int(body.get("qty", 0))
+        if qty < 0:
+            return jsonify({"error": "qty must be >= 0"}), 400
+        dismiss_recovery(trade_id, qty)
+        return jsonify({"ok": True, "trade_id": trade_id, "dismissed_qty": qty})
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 

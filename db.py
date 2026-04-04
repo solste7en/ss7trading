@@ -573,6 +573,7 @@ def _ensure_income_tables(conn):
             is_win                INTEGER DEFAULT 0,
             is_perfect_win        INTEGER DEFAULT 0,
             assignment_stock_price REAL,
+            recovery_dismissed_qty INTEGER DEFAULT 0,
             dedup_key             TEXT    UNIQUE,
             synced_at             TEXT    DEFAULT (datetime('now'))
         );
@@ -605,6 +606,11 @@ def _ensure_income_tables(conn):
             last_synced TEXT
         );
     """)
+    # Migrate: add recovery_dismissed_qty if missing (tables created before v0.2.1)
+    try:
+        conn.execute("SELECT recovery_dismissed_qty FROM income_trades LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE income_trades ADD COLUMN recovery_dismissed_qty INTEGER DEFAULT 0")
     conn.commit()
 
 
@@ -703,27 +709,67 @@ def get_income_sync_time():
     return row[0] if row else None
 
 
-def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outcome=""):
-    offset = (page - 1) * limit
+def _income_trades_where(ticker="", status="", strategy="", outcome="", table_alias="t"):
+    """Build WHERE fragments for income_trades filters. Returns (list of SQL fragments, params)."""
+    p = f"{table_alias}." if table_alias else ""
     where, params = [], []
     if ticker:
-        where.append("t.underlying = ?"); params.append(ticker.upper())
+        where.append(f"{p}underlying = ?"); params.append(ticker.upper())
     if status:
-        where.append("t.status = ?"); params.append(status)
+        where.append(f"{p}status = ?"); params.append(status)
     if strategy:
-        where.append("t.strategy LIKE ?"); params.append(f"%{strategy}%")
+        where.append(f"{p}strategy LIKE ?"); params.append(f"%{strategy}%")
     if outcome == "win":
-        where.append("t.is_win = 1")
+        where.append(f"{p}is_win = 1")
     elif outcome == "perfect":
-        where.append("t.is_perfect_win = 1")
+        where.append(f"{p}is_perfect_win = 1")
     elif outcome == "assigned":
-        where.append("t.status = 'assigned'")
+        where.append(f"{p}status = 'assigned'")
     elif outcome == "open":
-        where.append("t.status = 'open'")
+        where.append(f"{p}status = 'open'")
     elif outcome == "closed":
-        where.append("t.status = 'closed'")
+        # Must match get_income_stats closed_trades: SUM(status != 'open'), not status='closed' only.
+        where.append(f"{p}status != 'open'")
+    return where, params
 
-    clause = ("WHERE " + " AND ".join(where)) if where else ""
+
+def _income_attach_legs(cur, trades):
+    if not trades:
+        return
+    trade_ids = [t["id"] for t in trades]
+    ph = ",".join("?" for _ in trade_ids)
+    cur.execute(f"""
+        SELECT * FROM income_trade_legs WHERE trade_id IN ({ph})
+        ORDER BY trade_id, id
+    """, trade_ids)
+    legs_by_trade = {}
+    for leg in cur.fetchall():
+        leg_dict = dict(leg)
+        tid = leg_dict["trade_id"]
+        legs_by_trade.setdefault(tid, []).append(leg_dict)
+    for t in trades:
+        t["legs"] = legs_by_trade.get(t["id"], [])
+
+
+def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outcome="",
+                      sort_by="open_date", sort_dir="desc"):
+    offset = (page - 1) * limit
+    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "t")
+    clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
+    sb = (sort_by or "open_date").lower()
+    rev = (sort_dir or "desc").lower() != "asc"
+
+    sort_map = {
+        "open_date": "t.open_date",
+        "close_date": "t.close_date",
+        "underlying": "t.underlying",
+        "strategy": "t.strategy",
+        "net_pnl": "t.net_pnl",
+        "net_pnl_pct": "t.net_pnl_pct",
+        "days_held": "t.days_held",
+        "status": "t.status",
+        "net_premium": "t.net_premium",
+    }
 
     conn = _connect()
     _ensure_income_tables(conn)
@@ -732,30 +778,40 @@ def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outco
     cur.execute(f"SELECT COUNT(*) FROM income_trades t {clause}", params)
     total = cur.fetchone()[0]
 
-    cur.execute(f"""
-        SELECT t.* FROM income_trades t {clause}
-        ORDER BY t.open_date DESC, t.id DESC
-        LIMIT ? OFFSET ?
-    """, params + [limit, offset])
-    trades = [dict(r) for r in cur.fetchall()]
+    if sb in ("recovery", "recovery_pnl"):
+        # Recovery fields are computed — load all matches, attach, sort, paginate in memory
+        from recovery import attach_recovery_summaries
+        cur.execute(f"SELECT t.* FROM income_trades t {clause} ORDER BY t.id DESC", params)
+        trades = [dict(r) for r in cur.fetchall()]
+        _income_attach_legs(cur, trades)
+        attach_recovery_summaries(trades)
 
-    if trades:
-        trade_ids = [t["id"] for t in trades]
-        ph = ",".join("?" for _ in trade_ids)
-        cur.execute(f"""
-            SELECT * FROM income_trade_legs WHERE trade_id IN ({ph})
-            ORDER BY trade_id, id
-        """, trade_ids)
-        legs_by_trade = {}
-        for leg in cur.fetchall():
-            leg_dict = dict(leg)
-            tid = leg_dict["trade_id"]
-            legs_by_trade.setdefault(tid, []).append(leg_dict)
-        for t in trades:
-            t["legs"] = legs_by_trade.get(t["id"], [])
+        def _rec_frac(t):
+            tgt = t.get("recovery_target")
+            if not tgt:
+                return -1.0
+            return (t.get("recovery_recovered") or 0) / max(tgt, 1)
+
+        if sb == "recovery":
+            trades.sort(key=_rec_frac, reverse=rev)
+        else:
+            def _pnl_key(t):
+                v = t.get("recovery_pnl")
+                if v is None:
+                    return float("-inf") if rev else float("inf")
+                return v
+            trades.sort(key=_pnl_key, reverse=rev)
+        trades = trades[offset:offset + limit]
     else:
-        for t in trades:
-            t["legs"] = []
+        order_col = sort_map.get(sb, "t.open_date")
+        order_dir = "ASC" if not rev else "DESC"
+        cur.execute(f"""
+            SELECT t.* FROM income_trades t {clause}
+            ORDER BY {order_col} {order_dir}, t.id DESC
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset])
+        trades = [dict(r) for r in cur.fetchall()]
+        _income_attach_legs(cur, trades)
 
     conn.close()
     return {
@@ -767,11 +823,9 @@ def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outco
     }
 
 
-def get_income_stats(ticker=""):
-    where, params = [], []
-    if ticker:
-        where.append("underlying = ?"); params.append(ticker.upper())
-    clause = ("WHERE " + " AND ".join(where)) if where else ""
+def get_income_stats(ticker="", status="", strategy="", outcome=""):
+    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "")
+    clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
 
     conn = _connect()
     _ensure_income_tables(conn)
@@ -803,3 +857,62 @@ def get_income_stats(ticker=""):
     row["open_premium"] = round(row["open_premium"] or 0, 2)
     row["last_synced"] = get_income_sync_time()
     return row
+
+
+def dismiss_recovery(trade_id, qty):
+    """Set recovery_dismissed_qty on an assigned income trade."""
+    conn = _connect()
+    _ensure_income_tables(conn)
+    conn.execute(
+        "UPDATE income_trades SET recovery_dismissed_qty = ? WHERE id = ? AND status = 'assigned'",
+        (qty, trade_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_assigned_trades_for_ticker(ticker):
+    """Return all assigned income trades + legs for a given ticker."""
+    conn = _connect()
+    _ensure_income_tables(conn)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT * FROM income_trades
+        WHERE underlying = ? AND status = 'assigned'
+        ORDER BY close_date ASC
+    """, (ticker.upper(),))
+    trades = [dict(r) for r in cur.fetchall()]
+    if trades:
+        ids = [t["id"] for t in trades]
+        ph = ",".join("?" for _ in ids)
+        cur.execute(f"""
+            SELECT * FROM income_trade_legs WHERE trade_id IN ({ph})
+            ORDER BY trade_id, id
+        """, ids)
+        legs_map = {}
+        for leg in cur.fetchall():
+            ld = dict(leg)
+            legs_map.setdefault(ld["trade_id"], []).append(ld)
+        for t in trades:
+            t["legs"] = legs_map.get(t["id"], [])
+    conn.close()
+    return trades
+
+
+def get_recovery_equity_trades(ticker, min_date, actions):
+    """Return equity transactions for a ticker from min_date onwards, filtered by actions."""
+    conn = _connect()
+    cur = conn.cursor()
+    ph = ",".join("?" for _ in actions)
+    cur.execute(f"""
+        SELECT trade_date, action, quantity, price, amount
+        FROM transactions
+        WHERE underlying = ? AND is_option = 0 AND category = 'equity'
+          AND trade_date >= ?
+          AND action IN ({ph})
+          AND (is_from_option_event IS NULL OR is_from_option_event = 0)
+        ORDER BY trade_date ASC, ROWID ASC
+    """, [ticker.upper(), min_date] + list(actions))
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
