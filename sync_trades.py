@@ -9,15 +9,15 @@ based on market hours / day of week, so cron can fire it frequently without wast
 
 Cron schedule (add via: crontab -e):
   # Every 10 min on weekdays 9:00 AM–5:00 PM ET
-  */10 9-16 * * 1-5  cd /path/to/schwab_app && python3.11 sync_trades.py
+  */10 9-16 * * 1-5  cd /path/to/schwab_app && python3 sync_trades.py
   # Once daily on weekends at 9:00 AM ET (catches assignments/exercises)
-  0 9 * * 0,6        cd /path/to/schwab_app && python3.11 sync_trades.py --force
+  0 9 * * 0,6        cd /path/to/schwab_app && python3 sync_trades.py --force
 
 Usage:
-  python3.11 sync_trades.py            # respects market-hours window
-  python3.11 sync_trades.py --force    # runs regardless of time (useful for weekends/testing)
-  python3.11 sync_trades.py --days 7   # look back N days (default: 2)
-  python3.11 sync_trades.py --backfill # enrich existing DB rows that have empty descriptions
+  python3 sync_trades.py            # respects market-hours window
+  python3 sync_trades.py --force    # runs regardless of time (useful for weekends/testing)
+  python3 sync_trades.py --days 7   # look back N days (default: 2)
+  python3 sync_trades.py --backfill # enrich existing DB rows that have empty descriptions
 """
 
 import sys
@@ -31,6 +31,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from auth import get_client
+from authlib.integrations.base_client.errors import OAuthError
+from migrate_db import get_pending_migrations
 import schwab
 
 # ── config ────────────────────────────────────────────────────────────────────
@@ -572,14 +574,55 @@ def enrich_ticker(row: dict, db_conn: sqlite3.Connection | None = None):
         row["symbol"]     = ticker
         row["underlying"] = ticker
 
+def schwab_get_account_numbers(client):
+    """
+    First API call; triggers OAuth refresh if the access token expired.
+    Schwab often returns refresh_token_authentication_error when the refresh
+    token is expired, revoked, or was issued for different app credentials.
+    """
+    try:
+        return client.get_account_numbers()
+    except OAuthError as e:
+        log.error(
+            "OAuth refresh failed (%s). Schwab rejected the refresh token — "
+            "it may be expired, revoked, or not match SCHWAB_APP_KEY / SCHWAB_APP_SECRET.",
+            e,
+        )
+        log.error(
+            "Fix: run `python auth.py` in this directory to log in again and write a new token.json. "
+            "Ensure .env keys match the same app in the Schwab Developer Portal as when the token was created."
+        )
+        sys.exit(1)
+
+
+# ── schema guard ──────────────────────────────────────────────────────────────
+
+def _assert_schema_current() -> None:
+    """Exit with a clear message if trades.db has pending schema migrations."""
+    pending = get_pending_migrations()
+    if not pending:
+        return
+    log.error(
+        "trades.db schema is out of date — %d pending migration(s):", len(pending)
+    )
+    for ver, desc in pending:
+        log.error("  [%s] %s", ver, desc)
+    log.error(
+        "Run  python migrate_db.py  in the schwab_app directory to update the "
+        "schema, then re-run this script."
+    )
+    sys.exit(1)
+
+
 # ── main sync ─────────────────────────────────────────────────────────────────
 
 def sync(lookback_days: int = 2):
+    _assert_schema_current()
     log.info("=== sync_trades.py starting (lookback=%d days) ===", lookback_days)
 
     client = get_client()
 
-    resp = client.get_account_numbers()
+    resp = schwab_get_account_numbers(client)
     resp.raise_for_status()
     accounts   = resp.json()
     acct_hash  = accounts[0]["hashValue"]
@@ -650,10 +693,11 @@ def dry_run(lookback_days: int = 7):
     Fetch transactions from Schwab and show what WOULD be inserted,
     without writing anything to the database. Good for testing.
     """
+    _assert_schema_current()
     log.info("=== DRY RUN (lookback=%d days) — nothing will be written ===", lookback_days)
 
     client   = get_client()
-    resp     = client.get_account_numbers()
+    resp     = schwab_get_account_numbers(client)
     resp.raise_for_status()
     accounts  = resp.json()
     acct_hash = accounts[0]["hashValue"]
@@ -717,6 +761,7 @@ def backfill_descriptions():
     Enrich existing DB rows that have empty description/symbol fields.
     Targets income and transfer rows where the API description wasn't captured.
     """
+    _assert_schema_current()
     log.info("=== Backfilling empty descriptions ===")
 
     conn = sqlite3.connect(DB_PATH)
@@ -738,7 +783,7 @@ def backfill_descriptions():
 
     # Fetch fresh data from API to match against DB rows
     client   = get_client()
-    resp     = client.get_account_numbers()
+    resp     = schwab_get_account_numbers(client)
     resp.raise_for_status()
     acct_hash = resp.json()[0]["hashValue"]
 
