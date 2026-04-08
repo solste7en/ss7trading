@@ -17,8 +17,10 @@ from db import (
     get_watchlists, create_watchlist, delete_watchlist,
     get_watchlist_symbols, add_watchlist_symbol, remove_watchlist_symbol,
     get_income_trades, get_income_stats, dismiss_recovery,
+    get_trade_sync_time, set_trade_sync_time, get_most_traded_ticker,
 )
-from sync_trades import parse_schwab_transaction
+from migrate_db import get_pending_migrations
+from sync_trades import parse_schwab_transaction, sync as run_trade_sync
 from income_sync import run_sync as run_income_sync
 from recovery import compute_recovery, sum_recovery_pnl_filtered, attach_recovery_summaries
 
@@ -1211,6 +1213,71 @@ def api_strategy_suggest():
         })
     except Exception as e:
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+# ── Trade History Sync ─────────────────────────────────────────────────────────
+
+_trades_sync_lock = threading.Lock()
+
+
+@app.route("/api/trades/last-sync")
+def api_trades_last_sync():
+    """Return the last trade sync timestamp and most-traded ticker."""
+    try:
+        return jsonify({
+            "last_synced":         get_trade_sync_time(),
+            "most_traded_ticker":  get_most_traded_ticker(),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/api/trades/sync", methods=["POST"])
+def api_trades_sync():
+    """
+    Trigger a trade sync from Schwab API.
+
+    Automatically calculates --days as (days since last sync + 3), minimum 2,
+    maximum 365.  If never synced before, defaults to 7 days.
+
+    Returns: {ok, fetched, inserted, skipped, errors, most_traded_ticker,
+              lookback_days, last_synced}
+    """
+    if not _trades_sync_lock.acquire(blocking=False):
+        return jsonify({"error": "Sync already in progress"}), 409
+
+    try:
+        pending = get_pending_migrations()
+        if pending:
+            desc = "; ".join(f"[{v}] {d}" for v, d in pending)
+            return jsonify({
+                "error": f"DB schema is out of date — run `python migrate_db.py` first. "
+                         f"Pending: {desc}"
+            }), 400
+
+        last_synced = get_trade_sync_time()
+        if last_synced:
+            from datetime import datetime as _dt
+            last_dt     = _dt.fromisoformat(last_synced)
+            days_since  = (datetime.datetime.utcnow() - last_dt).days
+            lookback    = min(365, max(2, days_since + 3))
+        else:
+            lookback = 7
+
+        result = run_trade_sync(lookback_days=lookback, check_schema=False)
+        set_trade_sync_time()
+
+        return jsonify({
+            "ok":                  True,
+            "lookback_days":       lookback,
+            "last_synced":         get_trade_sync_time(),
+            "most_traded_ticker":  get_most_traded_ticker(),
+            **result,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    finally:
+        _trades_sync_lock.release()
 
 
 # ── Income Performance Tracking ────────────────────────────────────────────────

@@ -709,6 +709,59 @@ def get_income_sync_time():
     return row[0] if row else None
 
 
+# ── Trade History Sync Meta ───────────────────────────────────────────────────
+
+def _ensure_trades_sync_meta(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS trades_sync_meta (
+            id          INTEGER PRIMARY KEY CHECK (id = 1),
+            last_synced TEXT
+        )
+    """)
+    conn.commit()
+
+
+def get_trade_sync_time() -> str | None:
+    """Return the ISO timestamp of the last trades sync, or None if never synced."""
+    conn = _connect()
+    _ensure_trades_sync_meta(conn)
+    cur = conn.cursor()
+    cur.execute("SELECT last_synced FROM trades_sync_meta WHERE id=1")
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def set_trade_sync_time() -> None:
+    """Record the current UTC time as the last successful trade sync timestamp."""
+    conn = _connect()
+    _ensure_trades_sync_meta(conn)
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+    conn.execute("""
+        INSERT INTO trades_sync_meta (id, last_synced) VALUES (1, ?)
+        ON CONFLICT(id) DO UPDATE SET last_synced = excluded.last_synced
+    """, (now,))
+    conn.commit()
+    conn.close()
+
+
+def get_most_traded_ticker() -> str | None:
+    """Return the underlying symbol with the most total transactions in the DB."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT underlying, COUNT(*) AS cnt
+        FROM transactions
+        WHERE underlying IS NOT NULL AND underlying != ''
+        GROUP BY underlying
+        ORDER BY cnt DESC
+        LIMIT 1
+    """)
+    row = cur.fetchone()
+    conn.close()
+    return row["underlying"] if row else None
+
+
 def _income_trades_where(ticker="", status="", strategy="", outcome="", table_alias="t"):
     """Build WHERE fragments for income_trades filters. Returns (list of SQL fragments, params)."""
     p = f"{table_alias}." if table_alias else ""

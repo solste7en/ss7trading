@@ -554,6 +554,20 @@ async function fetchQuote() {
 // ── Trade History (paginated) ─────────────────────────────────────
 const historyState = { page:1, loaded:false };
 
+async function _loadHistoryLastSync() {
+  try {
+    const meta = await fetch('/api/trades/last-sync').then(r => r.json());
+    const el = document.getElementById('h-last-sync');
+    if (!el) return;
+    if (meta.last_synced) {
+      const dt = new Date(meta.last_synced + 'Z');
+      el.textContent = 'Last sync: ' + dt.toLocaleString();
+    } else {
+      el.textContent = 'Not synced yet';
+    }
+  } catch (_) { /* non-fatal */ }
+}
+
 async function loadHistory(resetPage=true) {
   if (resetPage) historyState.page = 1;
   const ticker   = document.getElementById('h-ticker').value.trim();
@@ -564,6 +578,8 @@ async function loadHistory(resetPage=true) {
   document.getElementById('h-loading').style.display='block';
   document.getElementById('h-table').style.display='none';
   document.getElementById('h-error').style.display='none';
+
+  _loadHistoryLastSync();
 
   try {
     const params = new URLSearchParams({
@@ -603,6 +619,81 @@ async function loadHistory(resetPage=true) {
     document.getElementById('h-loading').style.display='none';
     document.getElementById('h-error').style.display='block';
     document.getElementById('h-error').textContent='Error: '+e.message;
+  }
+}
+
+// ── Trade Sync ────────────────────────────────────────────────────
+function closeSyncModal() {
+  document.getElementById('h-sync-modal').style.display = 'none';
+}
+
+async function syncTrades() {
+  const btn  = document.getElementById('h-sync-btn');
+  const icon = document.getElementById('h-sync-icon');
+  const syncEl = document.getElementById('h-last-sync');
+  btn.disabled = true;
+  icon.classList.add('ip-spin');
+  if (syncEl) syncEl.textContent = 'Syncing…';
+
+  try {
+    const res = await fetch('/api/trades/sync', { method: 'POST' }).then(r => r.json());
+
+    const modal     = document.getElementById('h-sync-modal');
+    const titleEl   = document.getElementById('h-sync-modal-title');
+    const bodyEl    = document.getElementById('h-sync-modal-body');
+
+    if (res.error) {
+      titleEl.textContent = 'Sync Failed';
+      bodyEl.innerHTML = `<div class="sync-modal-row">
+        <span class="sync-modal-label">Error</span>
+        <span class="sync-modal-value err">${esc(res.error)}</span>
+      </div>`;
+    } else {
+      titleEl.textContent = '✓ Sync Complete';
+      const lastSyncStr = res.last_synced
+        ? new Date(res.last_synced + 'Z').toLocaleString()
+        : '—';
+      bodyEl.innerHTML = `
+        <div class="sync-modal-row">
+          <span class="sync-modal-label">Fetched from Schwab API</span>
+          <span class="sync-modal-value">${(res.fetched||0).toLocaleString()} raw transactions</span>
+        </div>
+        <div class="sync-modal-row">
+          <span class="sync-modal-label">Inserted</span>
+          <span class="sync-modal-value pos">${(res.inserted||0).toLocaleString()}</span>
+        </div>
+        <div class="sync-modal-row">
+          <span class="sync-modal-label">Skipped (duplicates)</span>
+          <span class="sync-modal-value">${(res.skipped||0).toLocaleString()}</span>
+        </div>
+        <div class="sync-modal-row">
+          <span class="sync-modal-label">Errors</span>
+          <span class="sync-modal-value${res.errors ? ' err' : ''}">${(res.errors||0).toLocaleString()}</span>
+        </div>
+        <div class="sync-modal-row">
+          <span class="sync-modal-label">Lookback window</span>
+          <span class="sync-modal-value">${res.lookback_days} days</span>
+        </div>
+        ${res.most_traded_ticker ? `
+        <div class="sync-modal-row">
+          <span class="sync-modal-label">Most traded ticker</span>
+          <span class="sync-modal-value highlight">${esc(res.most_traded_ticker)}</span>
+        </div>` : ''}
+        <div class="sync-modal-row">
+          <span class="sync-modal-label">Synced at</span>
+          <span class="sync-modal-value">${lastSyncStr}</span>
+        </div>`;
+
+      loadHistory();
+    }
+
+    modal.style.display = 'flex';
+  } catch (e) {
+    alert('Sync error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    icon.classList.remove('ip-spin');
+    _loadHistoryLastSync();
   }
 }
 

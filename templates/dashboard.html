@@ -117,22 +117,30 @@
 
 <!-- ── Trade History ── -->
 <div class="panel" id="tab-history">
-  <div class="filters">
-    <input type="text" id="h-ticker"   placeholder="Ticker (e.g. NVDA)" oninput="debounce(loadHistory)">
-    <input type="text" id="h-search"   placeholder="Search symbol/action…" oninput="debounce(loadHistory)">
-    <select id="h-category" onchange="loadHistory()">
-      <option value="">All categories</option>
-      <option value="option">Options</option>
-      <option value="equity">Equity</option>
-      <option value="income">Income</option>
-      <option value="transfer">Transfer</option>
-    </select>
-    <select id="h-limit" onchange="loadHistory()">
-      <option value="25">25 / page</option>
-      <option value="50">50 / page</option>
-      <option value="100">100 / page</option>
-    </select>
-    <span class="count" id="h-count"></span>
+  <div class="h-toolbar">
+    <div class="h-filters">
+      <input type="text" id="h-ticker"   placeholder="Ticker (e.g. NVDA)" oninput="debounce(loadHistory)">
+      <input type="text" id="h-search"   placeholder="Search symbol/action…" oninput="debounce(loadHistory)">
+      <select id="h-category" onchange="loadHistory()">
+        <option value="">All categories</option>
+        <option value="option">Options</option>
+        <option value="equity">Equity</option>
+        <option value="income">Income</option>
+        <option value="transfer">Transfer</option>
+      </select>
+      <select id="h-limit" onchange="loadHistory()">
+        <option value="25">25 / page</option>
+        <option value="50">50 / page</option>
+        <option value="100">100 / page</option>
+      </select>
+      <span class="h-count" id="h-count"></span>
+    </div>
+    <div class="ip-sync-area">
+      <span id="h-last-sync" class="ip-sync-time"></span>
+      <button id="h-sync-btn" class="ip-sync-btn" onclick="syncTrades()">
+        <span id="h-sync-icon">&#8635;</span> Sync from Schwab
+      </button>
+    </div>
   </div>
   <div class="loading" id="h-loading">Loading…</div>
   <div id="h-error" class="error" style="display:none"></div>
@@ -929,6 +937,20 @@
     </table>
   </div>
   <div id="ord-empty" style="display:none;color:#64748b;padding:32px;text-align:center">No open orders found.</div>
+</div>
+
+<!-- ── Trade Sync Results Modal ── -->
+<div id="h-sync-modal" class="sync-modal-overlay" style="display:none" onclick="if(event.target===this)closeSyncModal()">
+  <div class="sync-modal">
+    <div class="sync-modal-header">
+      <span class="sync-modal-title" id="h-sync-modal-title">Sync Complete</span>
+      <button class="sync-modal-x" onclick="closeSyncModal()">&#10005;</button>
+    </div>
+    <div class="sync-modal-body" id="h-sync-modal-body"></div>
+    <div class="sync-modal-footer">
+      <button class="ip-sync-btn" onclick="closeSyncModal()">Close</button>
+    </div>
+  </div>
 </div>
 
 <script src="/static/js/dashboard.js"></script>

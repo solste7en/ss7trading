@@ -616,8 +616,10 @@ def _assert_schema_current() -> None:
 
 # ── main sync ─────────────────────────────────────────────────────────────────
 
-def sync(lookback_days: int = 2):
-    _assert_schema_current()
+def sync(lookback_days: int = 2, check_schema: bool = True) -> dict:
+    """Run a trade sync and return a summary dict with fetched/inserted/skipped/errors."""
+    if check_schema:
+        _assert_schema_current()
     log.info("=== sync_trades.py starting (lookback=%d days) ===", lookback_days)
 
     client = get_client()
@@ -683,7 +685,12 @@ def sync(lookback_days: int = 2):
 
     conn.close()
     log.info("Done — inserted: %d | skipped: %d | errors: %d", inserted, skipped, errors)
-    return inserted, skipped, errors
+    return {
+        "fetched":  len(raw_txs),
+        "inserted": inserted,
+        "skipped":  skipped,
+        "errors":   errors,
+    }
 
 
 # ── dry run ───────────────────────────────────────────────────────────────────
