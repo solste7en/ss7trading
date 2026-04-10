@@ -10,9 +10,7 @@ import logging
 from db import (
     get_assigned_trades_for_ticker,
     get_recovery_equity_trades,
-    _income_trades_where,
-    _connect,
-    _ensure_income_tables,
+    get_income_trade_ids_filtered,
 )
 
 log = logging.getLogger(__name__)
@@ -145,14 +143,7 @@ def _match_recovery(ticker, assignments, actions, direction):
 
 def sum_recovery_pnl_filtered(ticker="", status="", strategy="", outcome=""):
     """Sum recovery P&L for assigned income trades matching the same filters as the trades table."""
-    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "")
-    clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
-    conn = _connect()
-    _ensure_income_tables(conn)
-    cur = conn.cursor()
-    cur.execute(f"SELECT id, underlying FROM income_trades {clause}", params)
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
+    rows = get_income_trade_ids_filtered(ticker, status, strategy, outcome)
     if not rows:
         return 0.0
     by_under = {}

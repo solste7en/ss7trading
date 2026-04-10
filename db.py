@@ -4,16 +4,27 @@ Provides reusable query functions for the trades.db SQLite database.
 """
 import math
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "trades.db"
+from config import DB_PATH
 
 
 def _connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+@contextmanager
+def _connection():
+    """Context manager that guarantees the connection is closed even on exception."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def get_transactions(page=1, limit=25, category="", ticker="", search=""):
@@ -31,24 +42,23 @@ def get_transactions(page=1, limit=25, category="", ticker="", search=""):
 
     clause = ("WHERE " + " AND ".join(where)) if where else ""
 
-    conn = _connect()
-    cur = conn.cursor()
+    with _connection() as conn:
+        cur = conn.cursor()
 
-    cur.execute(f"SELECT COUNT(*) FROM transactions {clause}", params)
-    total = cur.fetchone()[0]
+        cur.execute(f"SELECT COUNT(*) FROM transactions {clause}", params)
+        total = cur.fetchone()[0]
 
-    cur.execute(f"""
-        SELECT trade_date, action, category, symbol, underlying,
-               quantity, price, fees, amount,
-               is_option, option_type, option_strike, option_expiry,
-               is_from_option_event, linked_option_action
-        FROM transactions {clause}
-        ORDER BY trade_date DESC, id DESC
-        LIMIT ? OFFSET ?
-    """, params + [limit, offset])
+        cur.execute(f"""
+            SELECT trade_date, action, category, symbol, underlying,
+                   quantity, price, fees, amount,
+                   is_option, option_type, option_strike, option_expiry,
+                   is_from_option_event, linked_option_action
+            FROM transactions {clause}
+            ORDER BY trade_date DESC, id DESC
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset])
 
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
+        rows = [dict(r) for r in cur.fetchall()]
 
     return {
         "data": rows,
@@ -73,26 +83,25 @@ def get_realized_gains(page=1, limit=25, ticker="", term=""):
 
     clause = ("WHERE " + " AND ".join(where)) if where else ""
 
-    conn = _connect()
-    cur = conn.cursor()
+    with _connection() as conn:
+        cur = conn.cursor()
 
-    cur.execute(f"SELECT COUNT(*) FROM realized_gains {clause}", params)
-    total = cur.fetchone()[0]
+        cur.execute(f"SELECT COUNT(*) FROM realized_gains {clause}", params)
+        total = cur.fetchone()[0]
 
-    cur.execute(f"""
-        SELECT symbol, underlying, name, closed_date, quantity,
-               closing_price, cb_method, proceeds, cost_basis,
-               total_gl_amt, total_gl_pct,
-               lt_gl_amt, lt_gl_pct, st_gl_amt, st_gl_pct,
-               wash_sale, disallowed_loss,
-               is_option, option_type, option_strike, option_expiry
-        FROM realized_gains {clause}
-        ORDER BY closed_date DESC, id DESC
-        LIMIT ? OFFSET ?
-    """, params + [limit, offset])
+        cur.execute(f"""
+            SELECT symbol, underlying, name, closed_date, quantity,
+                   closing_price, cb_method, proceeds, cost_basis,
+                   total_gl_amt, total_gl_pct,
+                   lt_gl_amt, lt_gl_pct, st_gl_amt, st_gl_pct,
+                   wash_sale, disallowed_loss,
+                   is_option, option_type, option_strike, option_expiry
+            FROM realized_gains {clause}
+            ORDER BY closed_date DESC, id DESC
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset])
 
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
+        rows = [dict(r) for r in cur.fetchall()]
 
     return {
         "data": rows,
@@ -109,60 +118,57 @@ def get_top_tickers(top_n=10, recent_n=5):
     *equity-only* trades (options excluded for clarity on the overview page).
     Uses a window function to avoid N+1 queries.
     """
-    conn = _connect()
-    cur = conn.cursor()
+    with _connection() as conn:
+        cur = conn.cursor()
 
-    cur.execute("""
-        SELECT underlying,
-               COUNT(*) as cnt,
-               SUM(CASE WHEN category = 'equity' THEN 1 ELSE 0 END) as equity_count,
-               SUM(CASE WHEN category = 'option' THEN 1 ELSE 0 END) as option_count
-        FROM transactions
-        WHERE category IN ('equity', 'option') AND underlying IS NOT NULL
-        GROUP BY underlying
-        ORDER BY cnt DESC
-        LIMIT ?
-    """, [top_n])
-    top = [
-        (row["underlying"], row["cnt"], row["equity_count"], row["option_count"])
-        for row in cur.fetchall()
-    ]
-
-    if not top:
-        conn.close()
-        return {"tickers": []}
-
-    placeholders = ",".join("?" for _ in top)
-    symbols = [t[0] for t in top]
-
-    equity_actions = "'Buy','Sell','Sell Short','Buy to Cover'"
-    cur.execute(f"""
-        SELECT * FROM (
-            SELECT underlying, trade_date, action, symbol, quantity, price, amount,
-                   ROW_NUMBER() OVER (PARTITION BY underlying ORDER BY trade_date DESC, id DESC) as rn
+        cur.execute("""
+            SELECT underlying,
+                   COUNT(*) as cnt,
+                   SUM(CASE WHEN category = 'equity' THEN 1 ELSE 0 END) as equity_count,
+                   SUM(CASE WHEN category = 'option' THEN 1 ELSE 0 END) as option_count
             FROM transactions
-            WHERE underlying IN ({placeholders})
-              AND action IN ({equity_actions})
-              AND category = 'equity'
-        ) WHERE rn <= ?
-        ORDER BY underlying, rn
-    """, symbols + [recent_n])
+            WHERE category IN ('equity', 'option') AND underlying IS NOT NULL
+            GROUP BY underlying
+            ORDER BY cnt DESC
+            LIMIT ?
+        """, [top_n])
+        top = [
+            (row["underlying"], row["cnt"], row["equity_count"], row["option_count"])
+            for row in cur.fetchall()
+        ]
 
-    trades_by_ticker = {}
-    for row in cur.fetchall():
-        sym = row["underlying"]
-        if sym not in trades_by_ticker:
-            trades_by_ticker[sym] = []
-        trades_by_ticker[sym].append({
-            "trade_date": row["trade_date"],
-            "action": row["action"],
-            "symbol": row["symbol"],
-            "quantity": row["quantity"],
-            "price": row["price"],
-            "amount": row["amount"],
-        })
+        if not top:
+            return {"tickers": []}
 
-    conn.close()
+        placeholders = ",".join("?" for _ in top)
+        symbols = [t[0] for t in top]
+
+        equity_actions = "'Buy','Sell','Sell Short','Buy to Cover'"
+        cur.execute(f"""
+            SELECT * FROM (
+                SELECT underlying, trade_date, action, symbol, quantity, price, amount,
+                       ROW_NUMBER() OVER (PARTITION BY underlying ORDER BY trade_date DESC, id DESC) as rn
+                FROM transactions
+                WHERE underlying IN ({placeholders})
+                  AND action IN ({equity_actions})
+                  AND category = 'equity'
+            ) WHERE rn <= ?
+            ORDER BY underlying, rn
+        """, symbols + [recent_n])
+
+        trades_by_ticker = {}
+        for row in cur.fetchall():
+            sym = row["underlying"]
+            if sym not in trades_by_ticker:
+                trades_by_ticker[sym] = []
+            trades_by_ticker[sym].append({
+                "trade_date": row["trade_date"],
+                "action": row["action"],
+                "symbol": row["symbol"],
+                "quantity": row["quantity"],
+                "price": row["price"],
+                "amount": row["amount"],
+            })
 
     result = []
     for sym, cnt, eq_cnt, opt_cnt in top:
@@ -195,17 +201,16 @@ def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
     cumulative volume) are treated as already-filled rungs rather than
     breaking the streak.
     """
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT trade_date, action, quantity, price
-        FROM transactions
-        WHERE underlying = ? AND category = 'equity'
-          AND action IN ('Buy', 'Sell', 'Sell Short', 'Buy to Cover')
-        ORDER BY trade_date DESC, id DESC
-    """, [ticker])
-    all_trades = [dict(r) for r in cur.fetchall()]
-    conn.close()
+    with _connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT trade_date, action, quantity, price
+            FROM transactions
+            WHERE underlying = ? AND category = 'equity'
+              AND action IN ('Buy', 'Sell', 'Sell Short', 'Buy to Cover')
+            ORDER BY trade_date DESC, id DESC
+        """, [ticker])
+        all_trades = [dict(r) for r in cur.fetchall()]
 
     last_trade_price = all_trades[0]["price"] if all_trades else None
 
@@ -484,73 +489,64 @@ def _ensure_watchlist_tables(conn):
 
 
 def get_watchlists():
-    conn = _connect()
-    _ensure_watchlist_tables(conn)
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT w.id, w.name, COUNT(ws.id) AS symbol_count
-        FROM watchlists w
-        LEFT JOIN watchlist_symbols ws ON ws.watchlist_id = w.id
-        GROUP BY w.id
-        ORDER BY w.name
-    """)
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+    with _connection() as conn:
+        _ensure_watchlist_tables(conn)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT w.id, w.name, COUNT(ws.id) AS symbol_count
+            FROM watchlists w
+            LEFT JOIN watchlist_symbols ws ON ws.watchlist_id = w.id
+            GROUP BY w.id
+            ORDER BY w.name
+        """)
+        return [dict(r) for r in cur.fetchall()]
 
 
 def create_watchlist(name):
-    conn = _connect()
-    _ensure_watchlist_tables(conn)
-    cur = conn.cursor()
-    cur.execute("INSERT INTO watchlists (name) VALUES (?)", (name,))
-    conn.commit()
-    list_id = cur.lastrowid
-    conn.close()
-    return {"id": list_id, "name": name, "symbol_count": 0}
+    with _connection() as conn:
+        _ensure_watchlist_tables(conn)
+        cur = conn.cursor()
+        cur.execute("INSERT INTO watchlists (name) VALUES (?)", (name,))
+        conn.commit()
+        return {"id": cur.lastrowid, "name": name, "symbol_count": 0}
 
 
 def delete_watchlist(list_id):
-    conn = _connect()
-    _ensure_watchlist_tables(conn)
-    conn.execute("DELETE FROM watchlists WHERE id = ?", (list_id,))
-    conn.commit()
-    conn.close()
+    with _connection() as conn:
+        _ensure_watchlist_tables(conn)
+        conn.execute("DELETE FROM watchlists WHERE id = ?", (list_id,))
+        conn.commit()
 
 
 def get_watchlist_symbols(list_id):
-    conn = _connect()
-    _ensure_watchlist_tables(conn)
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT symbol FROM watchlist_symbols WHERE watchlist_id = ? ORDER BY symbol",
-        (list_id,),
-    )
-    syms = [r["symbol"] for r in cur.fetchall()]
-    conn.close()
-    return syms
+    with _connection() as conn:
+        _ensure_watchlist_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT symbol FROM watchlist_symbols WHERE watchlist_id = ? ORDER BY symbol",
+            (list_id,),
+        )
+        return [r["symbol"] for r in cur.fetchall()]
 
 
 def add_watchlist_symbol(list_id, symbol):
-    conn = _connect()
-    _ensure_watchlist_tables(conn)
-    conn.execute(
-        "INSERT OR IGNORE INTO watchlist_symbols (watchlist_id, symbol) VALUES (?, ?)",
-        (list_id, symbol.upper()),
-    )
-    conn.commit()
-    conn.close()
+    with _connection() as conn:
+        _ensure_watchlist_tables(conn)
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist_symbols (watchlist_id, symbol) VALUES (?, ?)",
+            (list_id, symbol.upper()),
+        )
+        conn.commit()
 
 
 def remove_watchlist_symbol(list_id, symbol):
-    conn = _connect()
-    _ensure_watchlist_tables(conn)
-    conn.execute(
-        "DELETE FROM watchlist_symbols WHERE watchlist_id = ? AND symbol = ?",
-        (list_id, symbol.upper()),
-    )
-    conn.commit()
-    conn.close()
+    with _connection() as conn:
+        _ensure_watchlist_tables(conn)
+        conn.execute(
+            "DELETE FROM watchlist_symbols WHERE watchlist_id = ? AND symbol = ?",
+            (list_id, symbol.upper()),
+        )
+        conn.commit()
 
 
 # ── Income Performance Tracking ──────────────────────────────────────────────
@@ -615,98 +611,94 @@ def _ensure_income_tables(conn):
 
 
 def clear_income_trades():
-    conn = _connect()
-    _ensure_income_tables(conn)
-    conn.executescript("DELETE FROM income_trade_legs; DELETE FROM income_trades;")
-    conn.commit()
-    conn.close()
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        conn.executescript("DELETE FROM income_trade_legs; DELETE FROM income_trades;")
+        conn.commit()
 
 
 def upsert_income_trade(trade, legs):
     """Insert or replace an income trade with its legs.
     `trade` is a dict, `legs` is a list of dicts."""
-    conn = _connect()
-    _ensure_income_tables(conn)
-    cur = conn.cursor()
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        cur = conn.cursor()
 
-    cur.execute("SELECT id FROM income_trades WHERE dedup_key = ?",
-                (trade["dedup_key"],))
-    existing = cur.fetchone()
-    if existing:
-        trade_id = existing[0]
-        cur.execute("DELETE FROM income_trade_legs WHERE trade_id = ?", (trade_id,))
-        cur.execute("""
-            UPDATE income_trades SET
-                underlying=?, strategy=?, open_date=?, close_date=?,
-                status=?, days_held=?, net_premium=?, close_cost=?, fees=?,
-                net_pnl=?, net_pnl_pct=?, is_win=?, is_perfect_win=?,
-                assignment_stock_price=?, synced_at=datetime('now')
-            WHERE id=?
-        """, (trade["underlying"], trade["strategy"], trade["open_date"],
-              trade.get("close_date"), trade["status"], trade.get("days_held"),
-              trade.get("net_premium"), trade.get("close_cost", 0),
-              trade.get("fees", 0), trade.get("net_pnl"),
-              trade.get("net_pnl_pct"), trade.get("is_win", 0),
-              trade.get("is_perfect_win", 0),
-              trade.get("assignment_stock_price"), trade_id))
-    else:
-        cur.execute("""
-            INSERT INTO income_trades
-                (underlying, strategy, open_date, close_date, status, days_held,
-                 net_premium, close_cost, fees, net_pnl, net_pnl_pct,
-                 is_win, is_perfect_win, assignment_stock_price, dedup_key)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (trade["underlying"], trade["strategy"], trade["open_date"],
-              trade.get("close_date"), trade["status"], trade.get("days_held"),
-              trade.get("net_premium"), trade.get("close_cost", 0),
-              trade.get("fees", 0), trade.get("net_pnl"),
-              trade.get("net_pnl_pct"), trade.get("is_win", 0),
-              trade.get("is_perfect_win", 0),
-              trade.get("assignment_stock_price"), trade["dedup_key"]))
-        trade_id = cur.lastrowid
+        cur.execute("SELECT id FROM income_trades WHERE dedup_key = ?",
+                    (trade["dedup_key"],))
+        existing = cur.fetchone()
+        if existing:
+            trade_id = existing[0]
+            cur.execute("DELETE FROM income_trade_legs WHERE trade_id = ?", (trade_id,))
+            cur.execute("""
+                UPDATE income_trades SET
+                    underlying=?, strategy=?, open_date=?, close_date=?,
+                    status=?, days_held=?, net_premium=?, close_cost=?, fees=?,
+                    net_pnl=?, net_pnl_pct=?, is_win=?, is_perfect_win=?,
+                    assignment_stock_price=?, synced_at=datetime('now')
+                WHERE id=?
+            """, (trade["underlying"], trade["strategy"], trade["open_date"],
+                  trade.get("close_date"), trade["status"], trade.get("days_held"),
+                  trade.get("net_premium"), trade.get("close_cost", 0),
+                  trade.get("fees", 0), trade.get("net_pnl"),
+                  trade.get("net_pnl_pct"), trade.get("is_win", 0),
+                  trade.get("is_perfect_win", 0),
+                  trade.get("assignment_stock_price"), trade_id))
+        else:
+            cur.execute("""
+                INSERT INTO income_trades
+                    (underlying, strategy, open_date, close_date, status, days_held,
+                     net_premium, close_cost, fees, net_pnl, net_pnl_pct,
+                     is_win, is_perfect_win, assignment_stock_price, dedup_key)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (trade["underlying"], trade["strategy"], trade["open_date"],
+                  trade.get("close_date"), trade["status"], trade.get("days_held"),
+                  trade.get("net_premium"), trade.get("close_cost", 0),
+                  trade.get("fees", 0), trade.get("net_pnl"),
+                  trade.get("net_pnl_pct"), trade.get("is_win", 0),
+                  trade.get("is_perfect_win", 0),
+                  trade.get("assignment_stock_price"), trade["dedup_key"]))
+            trade_id = cur.lastrowid
 
-    for leg in legs:
-        cur.execute("""
-            INSERT INTO income_trade_legs
-                (trade_id, leg_type, strike, expiry, direction,
-                 open_action, open_qty, open_price, open_date,
-                 close_action, close_qty, close_price, close_date,
-                 leg_pnl, schwab_open_activity_id, schwab_close_activity_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (trade_id, leg["leg_type"], leg["strike"], leg["expiry"],
-              leg["direction"], leg.get("open_action"), leg.get("open_qty"),
-              leg.get("open_price"), leg.get("open_date"),
-              leg.get("close_action"), leg.get("close_qty"),
-              leg.get("close_price"), leg.get("close_date"),
-              leg.get("leg_pnl"),
-              leg.get("schwab_open_activity_id"),
-              leg.get("schwab_close_activity_id")))
+        for leg in legs:
+            cur.execute("""
+                INSERT INTO income_trade_legs
+                    (trade_id, leg_type, strike, expiry, direction,
+                     open_action, open_qty, open_price, open_date,
+                     close_action, close_qty, close_price, close_date,
+                     leg_pnl, schwab_open_activity_id, schwab_close_activity_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (trade_id, leg["leg_type"], leg["strike"], leg["expiry"],
+                  leg["direction"], leg.get("open_action"), leg.get("open_qty"),
+                  leg.get("open_price"), leg.get("open_date"),
+                  leg.get("close_action"), leg.get("close_qty"),
+                  leg.get("close_price"), leg.get("close_date"),
+                  leg.get("leg_pnl"),
+                  leg.get("schwab_open_activity_id"),
+                  leg.get("schwab_close_activity_id")))
 
-    conn.commit()
-    conn.close()
-    return trade_id
+        conn.commit()
+        return trade_id
 
 
 def set_income_sync_time():
-    conn = _connect()
-    _ensure_income_tables(conn)
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    conn.execute("""
-        INSERT INTO income_sync_meta (id, last_synced) VALUES (1, ?)
-        ON CONFLICT(id) DO UPDATE SET last_synced = excluded.last_synced
-    """, (now,))
-    conn.commit()
-    conn.close()
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        conn.execute("""
+            INSERT INTO income_sync_meta (id, last_synced) VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET last_synced = excluded.last_synced
+        """, (now,))
+        conn.commit()
 
 
 def get_income_sync_time():
-    conn = _connect()
-    _ensure_income_tables(conn)
-    cur = conn.cursor()
-    cur.execute("SELECT last_synced FROM income_sync_meta WHERE id=1")
-    row = cur.fetchone()
-    conn.close()
-    return row[0] if row else None
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        cur = conn.cursor()
+        cur.execute("SELECT last_synced FROM income_sync_meta WHERE id=1")
+        row = cur.fetchone()
+        return row[0] if row else None
 
 
 # ── Trade History Sync Meta ───────────────────────────────────────────────────
@@ -723,43 +715,40 @@ def _ensure_trades_sync_meta(conn):
 
 def get_trade_sync_time() -> str | None:
     """Return the ISO timestamp of the last trades sync, or None if never synced."""
-    conn = _connect()
-    _ensure_trades_sync_meta(conn)
-    cur = conn.cursor()
-    cur.execute("SELECT last_synced FROM trades_sync_meta WHERE id=1")
-    row = cur.fetchone()
-    conn.close()
-    return row[0] if row else None
+    with _connection() as conn:
+        _ensure_trades_sync_meta(conn)
+        cur = conn.cursor()
+        cur.execute("SELECT last_synced FROM trades_sync_meta WHERE id=1")
+        row = cur.fetchone()
+        return row[0] if row else None
 
 
 def set_trade_sync_time() -> None:
     """Record the current UTC time as the last successful trade sync timestamp."""
-    conn = _connect()
-    _ensure_trades_sync_meta(conn)
-    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
-    conn.execute("""
-        INSERT INTO trades_sync_meta (id, last_synced) VALUES (1, ?)
-        ON CONFLICT(id) DO UPDATE SET last_synced = excluded.last_synced
-    """, (now,))
-    conn.commit()
-    conn.close()
+    with _connection() as conn:
+        _ensure_trades_sync_meta(conn)
+        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
+        conn.execute("""
+            INSERT INTO trades_sync_meta (id, last_synced) VALUES (1, ?)
+            ON CONFLICT(id) DO UPDATE SET last_synced = excluded.last_synced
+        """, (now,))
+        conn.commit()
 
 
 def get_most_traded_ticker() -> str | None:
     """Return the underlying symbol with the most total transactions in the DB."""
-    conn = _connect()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT underlying, COUNT(*) AS cnt
-        FROM transactions
-        WHERE underlying IS NOT NULL AND underlying != ''
-        GROUP BY underlying
-        ORDER BY cnt DESC
-        LIMIT 1
-    """)
-    row = cur.fetchone()
-    conn.close()
-    return row["underlying"] if row else None
+    with _connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT underlying, COUNT(*) AS cnt
+            FROM transactions
+            WHERE underlying IS NOT NULL AND underlying != ''
+            GROUP BY underlying
+            ORDER BY cnt DESC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        return row["underlying"] if row else None
 
 
 def _income_trades_where(ticker="", status="", strategy="", outcome="", table_alias="t"):
@@ -784,6 +773,17 @@ def _income_trades_where(ticker="", status="", strategy="", outcome="", table_al
         # Must match get_income_stats closed_trades: SUM(status != 'open'), not status='closed' only.
         where.append(f"{p}status != 'open'")
     return where, params
+
+
+def get_income_trade_ids_filtered(ticker="", status="", strategy="", outcome=""):
+    """Return list of {id, underlying} dicts for income_trades matching the given filters."""
+    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "")
+    clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        cur = conn.cursor()
+        cur.execute(f"SELECT id, underlying FROM income_trades {clause}", params)
+        return [dict(r) for r in cur.fetchall()]
 
 
 def _income_attach_legs(cur, trades):
@@ -824,49 +824,47 @@ def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outco
         "net_premium": "t.net_premium",
     }
 
-    conn = _connect()
-    _ensure_income_tables(conn)
-    cur = conn.cursor()
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        cur = conn.cursor()
 
-    cur.execute(f"SELECT COUNT(*) FROM income_trades t {clause}", params)
-    total = cur.fetchone()[0]
+        cur.execute(f"SELECT COUNT(*) FROM income_trades t {clause}", params)
+        total = cur.fetchone()[0]
 
-    if sb in ("recovery", "recovery_pnl"):
-        # Recovery fields are computed — load all matches, attach, sort, paginate in memory
-        from recovery import attach_recovery_summaries
-        cur.execute(f"SELECT t.* FROM income_trades t {clause} ORDER BY t.id DESC", params)
-        trades = [dict(r) for r in cur.fetchall()]
-        _income_attach_legs(cur, trades)
-        attach_recovery_summaries(trades)
+        if sb in ("recovery", "recovery_pnl"):
+            from recovery import attach_recovery_summaries
+            cur.execute(f"SELECT t.* FROM income_trades t {clause} ORDER BY t.id DESC", params)
+            trades = [dict(r) for r in cur.fetchall()]
+            _income_attach_legs(cur, trades)
+            attach_recovery_summaries(trades)
 
-        def _rec_frac(t):
-            tgt = t.get("recovery_target")
-            if not tgt:
-                return -1.0
-            return (t.get("recovery_recovered") or 0) / max(tgt, 1)
+            def _rec_frac(t):
+                tgt = t.get("recovery_target")
+                if not tgt:
+                    return -1.0
+                return (t.get("recovery_recovered") or 0) / max(tgt, 1)
 
-        if sb == "recovery":
-            trades.sort(key=_rec_frac, reverse=rev)
+            if sb == "recovery":
+                trades.sort(key=_rec_frac, reverse=rev)
+            else:
+                def _pnl_key(t):
+                    v = t.get("recovery_pnl")
+                    if v is None:
+                        return float("-inf") if rev else float("inf")
+                    return v
+                trades.sort(key=_pnl_key, reverse=rev)
+            trades = trades[offset:offset + limit]
         else:
-            def _pnl_key(t):
-                v = t.get("recovery_pnl")
-                if v is None:
-                    return float("-inf") if rev else float("inf")
-                return v
-            trades.sort(key=_pnl_key, reverse=rev)
-        trades = trades[offset:offset + limit]
-    else:
-        order_col = sort_map.get(sb, "t.open_date")
-        order_dir = "ASC" if not rev else "DESC"
-        cur.execute(f"""
-            SELECT t.* FROM income_trades t {clause}
-            ORDER BY {order_col} {order_dir}, t.id DESC
-            LIMIT ? OFFSET ?
-        """, params + [limit, offset])
-        trades = [dict(r) for r in cur.fetchall()]
-        _income_attach_legs(cur, trades)
+            order_col = sort_map.get(sb, "t.open_date")
+            order_dir = "ASC" if not rev else "DESC"
+            cur.execute(f"""
+                SELECT t.* FROM income_trades t {clause}
+                ORDER BY {order_col} {order_dir}, t.id DESC
+                LIMIT ? OFFSET ?
+            """, params + [limit, offset])
+            trades = [dict(r) for r in cur.fetchall()]
+            _income_attach_legs(cur, trades)
 
-    conn.close()
     return {
         "data": trades,
         "total": total,
@@ -880,26 +878,25 @@ def get_income_stats(ticker="", status="", strategy="", outcome=""):
     wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "")
     clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
 
-    conn = _connect()
-    _ensure_income_tables(conn)
-    cur = conn.cursor()
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        cur = conn.cursor()
 
-    cur.execute(f"""
-        SELECT
-            COUNT(*)                                          AS total_trades,
-            SUM(CASE WHEN status != 'open' THEN 1 ELSE 0 END) AS closed_trades,
-            SUM(CASE WHEN status  = 'open' THEN 1 ELSE 0 END) AS open_trades,
-            SUM(CASE WHEN is_win = 1 THEN 1 ELSE 0 END)       AS win_count,
-            SUM(CASE WHEN status != 'open' AND is_win = 0 THEN 1 ELSE 0 END) AS loss_count,
-            SUM(CASE WHEN is_perfect_win = 1 THEN 1 ELSE 0 END) AS perfect_win_count,
-            SUM(CASE WHEN status = 'assigned' THEN 1 ELSE 0 END) AS assigned_count,
-            COALESCE(SUM(CASE WHEN status != 'open' THEN net_pnl ELSE 0 END), 0) AS total_pnl,
-            COALESCE(SUM(net_premium), 0)                      AS total_premium_collected,
-            COALESCE(SUM(CASE WHEN status = 'open' THEN net_premium ELSE 0 END), 0) AS open_premium
-        FROM income_trades {clause}
-    """, params)
-    row = dict(cur.fetchone())
-    conn.close()
+        cur.execute(f"""
+            SELECT
+                COUNT(*)                                          AS total_trades,
+                SUM(CASE WHEN status != 'open' THEN 1 ELSE 0 END) AS closed_trades,
+                SUM(CASE WHEN status  = 'open' THEN 1 ELSE 0 END) AS open_trades,
+                SUM(CASE WHEN is_win = 1 THEN 1 ELSE 0 END)       AS win_count,
+                SUM(CASE WHEN status != 'open' AND is_win = 0 THEN 1 ELSE 0 END) AS loss_count,
+                SUM(CASE WHEN is_perfect_win = 1 THEN 1 ELSE 0 END) AS perfect_win_count,
+                SUM(CASE WHEN status = 'assigned' THEN 1 ELSE 0 END) AS assigned_count,
+                COALESCE(SUM(CASE WHEN status != 'open' THEN net_pnl ELSE 0 END), 0) AS total_pnl,
+                COALESCE(SUM(net_premium), 0)                      AS total_premium_collected,
+                COALESCE(SUM(CASE WHEN status = 'open' THEN net_premium ELSE 0 END), 0) AS open_premium
+            FROM income_trades {clause}
+        """, params)
+        row = dict(cur.fetchone())
 
     closed = row["closed_trades"] or 0
     row["win_rate"] = round(100 * (row["win_count"] or 0) / closed, 1) if closed else 0
@@ -914,58 +911,54 @@ def get_income_stats(ticker="", status="", strategy="", outcome=""):
 
 def dismiss_recovery(trade_id, qty):
     """Set recovery_dismissed_qty on an assigned income trade."""
-    conn = _connect()
-    _ensure_income_tables(conn)
-    conn.execute(
-        "UPDATE income_trades SET recovery_dismissed_qty = ? WHERE id = ? AND status = 'assigned'",
-        (qty, trade_id),
-    )
-    conn.commit()
-    conn.close()
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        conn.execute(
+            "UPDATE income_trades SET recovery_dismissed_qty = ? WHERE id = ? AND status = 'assigned'",
+            (qty, trade_id),
+        )
+        conn.commit()
 
 
 def get_assigned_trades_for_ticker(ticker):
     """Return all assigned income trades + legs for a given ticker."""
-    conn = _connect()
-    _ensure_income_tables(conn)
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT * FROM income_trades
-        WHERE underlying = ? AND status = 'assigned'
-        ORDER BY close_date ASC
-    """, (ticker.upper(),))
-    trades = [dict(r) for r in cur.fetchall()]
-    if trades:
-        ids = [t["id"] for t in trades]
-        ph = ",".join("?" for _ in ids)
-        cur.execute(f"""
-            SELECT * FROM income_trade_legs WHERE trade_id IN ({ph})
-            ORDER BY trade_id, id
-        """, ids)
-        legs_map = {}
-        for leg in cur.fetchall():
-            ld = dict(leg)
-            legs_map.setdefault(ld["trade_id"], []).append(ld)
-        for t in trades:
-            t["legs"] = legs_map.get(t["id"], [])
-    conn.close()
-    return trades
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM income_trades
+            WHERE underlying = ? AND status = 'assigned'
+            ORDER BY close_date ASC
+        """, (ticker.upper(),))
+        trades = [dict(r) for r in cur.fetchall()]
+        if trades:
+            ids = [t["id"] for t in trades]
+            ph = ",".join("?" for _ in ids)
+            cur.execute(f"""
+                SELECT * FROM income_trade_legs WHERE trade_id IN ({ph})
+                ORDER BY trade_id, id
+            """, ids)
+            legs_map = {}
+            for leg in cur.fetchall():
+                ld = dict(leg)
+                legs_map.setdefault(ld["trade_id"], []).append(ld)
+            for t in trades:
+                t["legs"] = legs_map.get(t["id"], [])
+        return trades
 
 
 def get_recovery_equity_trades(ticker, min_date, actions):
     """Return equity transactions for a ticker from min_date onwards, filtered by actions."""
-    conn = _connect()
-    cur = conn.cursor()
-    ph = ",".join("?" for _ in actions)
-    cur.execute(f"""
-        SELECT trade_date, action, quantity, price, amount
-        FROM transactions
-        WHERE underlying = ? AND is_option = 0 AND category = 'equity'
-          AND trade_date >= ?
-          AND action IN ({ph})
-          AND (is_from_option_event IS NULL OR is_from_option_event = 0)
-        ORDER BY trade_date ASC, ROWID ASC
-    """, [ticker.upper(), min_date] + list(actions))
-    rows = [dict(r) for r in cur.fetchall()]
-    conn.close()
-    return rows
+    with _connection() as conn:
+        cur = conn.cursor()
+        ph = ",".join("?" for _ in actions)
+        cur.execute(f"""
+            SELECT trade_date, action, quantity, price, amount
+            FROM transactions
+            WHERE underlying = ? AND is_option = 0 AND category = 'equity'
+              AND trade_date >= ?
+              AND action IN ({ph})
+              AND (is_from_option_event IS NULL OR is_from_option_event = 0)
+            ORDER BY trade_date ASC, ROWID ASC
+        """, [ticker.upper(), min_date] + list(actions))
+        return [dict(r) for r in cur.fetchall()]

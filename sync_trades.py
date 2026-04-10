@@ -38,12 +38,27 @@ import schwab
 # ── config ────────────────────────────────────────────────────────────────────
 
 BASE_DIR  = Path(__file__).parent
-DB_PATH   = BASE_DIR.parent / "trades.db"      # sibling of schwab_app/
 LOG_PATH  = BASE_DIR / "sync.log"
+
+from config import DB_PATH
 ET        = ZoneInfo("America/New_York")
 
 MARKET_OPEN  = 9    # 9:00 AM ET  (market opens 9:30, but 9 AM gives a small buffer)
 MARKET_CLOSE = 17   # 5:00 PM ET  (covers through market close at 4 PM + buffer)
+
+# Dedup / fuzzy-matching thresholds
+DEDUP_BUFFER_EXTRA_DAYS     = 3
+FUZZY_DATE_TOLERANCE_DAYS   = 2
+FUZZY_AMOUNT_TOLERANCE_PCT  = 0.02
+FUZZY_SMALL_AMOUNT_THRESHOLD = 0.01
+
+# Assignment tagger
+ASSIGNMENT_LOOKBACK_DAYS    = 7
+ASSIGNMENT_PRICE_TOLERANCE  = 0.02
+ASSIGNMENT_CONTRACT_SIZE    = 100
+
+# Small JOURNAL amounts treated as ADR fees
+JOURNAL_SMALL_AMOUNT        = 50
 
 # ── logging ───────────────────────────────────────────────────────────────────
 
@@ -228,6 +243,25 @@ def extract_fees(tx: dict) -> float | None:
 
 # ── Schwab API → normalised row ───────────────────────────────────────────────
 
+TYPE_MAP = {
+    "TRADE":              None,   # resolved per instrument below
+    "RECEIVE_AND_DELIVER": None,  # resolved below (expired, assigned, journaled)
+    "DIVIDEND_OR_INTEREST": None, # resolved below (qualified, ordinary, interest)
+    "ACH_RECEIPT":        "MoneyLink Transfer",
+    "ACH_DISBURSEMENT":   "MoneyLink Transfer",
+    "CASH_RECEIPT":       "MoneyLink Transfer",
+    "CASH_DISBURSEMENT":  "MoneyLink Transfer",
+    "ELECTRONIC_FUND":    "MoneyLink Transfer",
+    "WIRE_OUT":           "MoneyLink Transfer",
+    "WIRE_IN":            "MoneyLink Transfer",
+    "JOURNAL":            None,   # resolved below (ADR fee, foreign tax, generic journal)
+    "SMA_ADJUSTMENT":     "SMA Adjustment",
+    "MEMORANDUM":         "Other",
+    "MARGIN_CALL":        "Other",
+    "CORRECTION":         "Other",
+}
+
+
 def parse_schwab_transaction(tx: dict) -> dict | None:
     """
     Convert a raw Schwab transaction dict (from get_transactions)
@@ -238,30 +272,9 @@ def parse_schwab_transaction(tx: dict) -> dict | None:
     tx_desc     = tx.get("description", "")
     activity_id = tx.get("activityId") or tx.get("transactionId")
 
-    # Use execution time as trade_date — tradeDate in the API is T+1 settlement,
-    # but the CSV "Date" column records the execution date (same as "time" field).
     tx_date  = tx.get("time") or tx.get("tradeDate") or tx.get("settlementDate") or ""
     if tx_date:
         tx_date = tx_date[:10]
-
-    # Map Schwab API type → Schwab CSV action names we already use
-    TYPE_MAP = {
-        "TRADE":              None,   # resolved per instrument below
-        "RECEIVE_AND_DELIVER": None,  # resolved below (expired, assigned, journaled)
-        "DIVIDEND_OR_INTEREST": None, # resolved below (qualified, ordinary, interest)
-        "ACH_RECEIPT":        "MoneyLink Transfer",
-        "ACH_DISBURSEMENT":   "MoneyLink Transfer",
-        "CASH_RECEIPT":       "MoneyLink Transfer",
-        "CASH_DISBURSEMENT":  "MoneyLink Transfer",
-        "ELECTRONIC_FUND":    "MoneyLink Transfer",
-        "WIRE_OUT":           "MoneyLink Transfer",
-        "WIRE_IN":            "MoneyLink Transfer",
-        "JOURNAL":            None,   # resolved below (ADR fee, foreign tax, generic journal)
-        "SMA_ADJUSTMENT":     "SMA Adjustment",
-        "MEMORANDUM":         "Other",
-        "MARGIN_CALL":        "Other",
-        "CORRECTION":         "Other",
-    }
 
     action = TYPE_MAP.get(tx_type)
 
@@ -366,7 +379,7 @@ def parse_schwab_transaction(tx: dict) -> dict | None:
             action = "Foreign Tax Paid"
         elif "margin interest" in sub:
             action = "Margin Interest"
-        elif net_amount is not None and net_amount < 0 and abs(net_amount) < 50:
+        elif net_amount is not None and net_amount < 0 and abs(net_amount) < JOURNAL_SMALL_AMOUNT:
             # Small negative JOURNAL with a company-name description → likely ADR fee
             # (the API doesn't label these explicitly; it just gives the company name)
             desc_up = tx_desc.upper()
@@ -451,8 +464,8 @@ def tag_assignments(conn: sqlite3.Connection):
         FROM transactions
         WHERE action IN ('Assigned','Exchange or Exercise')
           AND option_strike IS NOT NULL
-          AND trade_date >= date('now', '-7 days')
-    """)
+          AND trade_date >= date('now', ? || ' days')
+    """, (f"-{ASSIGNMENT_LOOKBACK_DAYS}",))
     for opt_id, date, underlying, strike, opt_qty, opt_action in cur.fetchall():
         abs_qty = abs(opt_qty) if opt_qty else None
         cur.execute("""
@@ -461,11 +474,12 @@ def tag_assignments(conn: sqlite3.Connection):
               AND underlying  = ?
               AND category    = 'equity'
               AND action IN ('Buy','Sell','Sell Short')
-              AND ABS(price - ?) < 0.02
-              AND ABS(quantity) = ABS(?) * 100
+              AND ABS(price - ?) < ?
+              AND ABS(quantity) = ABS(?) * ?
               AND (is_from_option_event IS NULL OR is_from_option_event = 0)
             LIMIT 1
-        """, (date, underlying, strike, abs_qty))
+        """, (date, underlying, strike, ASSIGNMENT_PRICE_TOLERANCE,
+              abs_qty, ASSIGNMENT_CONTRACT_SIZE))
         row = cur.fetchone()
         if row:
             cur.execute("""
@@ -532,18 +546,19 @@ def is_duplicate(row: dict, exact_set: set, activity_id_set: set, fuzzy_idx: dic
         try:
             cand_dt  = datetime.strptime(cand_date, "%Y-%m-%d")
             day_diff = abs((row_dt - cand_dt).days)
-            if day_diff > 2:
+            if day_diff > FUZZY_DATE_TOLERANCE_DAYS:
                 continue
             if row_amt is None or cand_amt is None:
                 if day_diff == 0:
                     return True
                 continue
-            if abs(row_amt) < 0.01:
-                if abs(float(cand_amt)) < 0.01 and day_diff <= 2:
+            if abs(row_amt) < FUZZY_SMALL_AMOUNT_THRESHOLD:
+                if abs(float(cand_amt)) < FUZZY_SMALL_AMOUNT_THRESHOLD \
+                        and day_diff <= FUZZY_DATE_TOLERANCE_DAYS:
                     return True
                 continue
-            pct_diff = abs(row_amt - float(cand_amt)) / max(abs(row_amt), 0.01)
-            if pct_diff < 0.02:
+            pct_diff = abs(row_amt - float(cand_amt)) / max(abs(row_amt), FUZZY_SMALL_AMOUNT_THRESHOLD)
+            if pct_diff < FUZZY_AMOUNT_TOLERANCE_PCT:
                 return True
         except (ValueError, TypeError):
             continue
@@ -614,20 +629,20 @@ def _assert_schema_current() -> None:
     sys.exit(1)
 
 
-# ── main sync ─────────────────────────────────────────────────────────────────
+# ── shared fetch-prepare pipeline ──────────────────────────────────────────────
 
-def sync(lookback_days: int = 2, check_schema: bool = True) -> dict:
-    """Run a trade sync and return a summary dict with fetched/inserted/skipped/errors."""
-    if check_schema:
-        _assert_schema_current()
-    log.info("=== sync_trades.py starting (lookback=%d days) ===", lookback_days)
+def _fetch_and_prepare(lookback_days: int):
+    """Fetch transactions from Schwab API and prepare the dedup structures.
 
+    Returns (raw_txs, conn, cur, exact_set, activity_id_set, fuzzy_idx).
+    Caller is responsible for closing *conn*.
+    """
     client = get_client()
 
     resp = schwab_get_account_numbers(client)
     resp.raise_for_status()
-    accounts   = resp.json()
-    acct_hash  = accounts[0]["hashValue"]
+    accounts  = resp.json()
+    acct_hash = accounts[0]["hashValue"]
     log.info("Account: ...%s", accounts[0].get("accountNumber", "")[-4:])
 
     end_dt   = datetime.now(timezone.utc)
@@ -645,8 +660,21 @@ def sync(lookback_days: int = 2, check_schema: bool = True) -> dict:
     conn = sqlite3.connect(DB_PATH)
     cur  = conn.cursor()
 
-    buffer_date = (datetime.now() - timedelta(days=lookback_days + 3)).strftime("%Y-%m-%d")
+    buffer_date = (datetime.now() - timedelta(days=lookback_days + DEDUP_BUFFER_EXTRA_DAYS)).strftime("%Y-%m-%d")
     exact_set, activity_id_set, fuzzy_idx = build_dedup_structures(cur, buffer_date)
+
+    return raw_txs, conn, cur, exact_set, activity_id_set, fuzzy_idx
+
+
+# ── main sync ─────────────────────────────────────────────────────────────────
+
+def sync(lookback_days: int = 2, check_schema: bool = True) -> dict:
+    """Run a trade sync and return a summary dict with fetched/inserted/skipped/errors."""
+    if check_schema:
+        _assert_schema_current()
+    log.info("=== sync_trades.py starting (lookback=%d days) ===", lookback_days)
+
+    raw_txs, conn, cur, exact_set, activity_id_set, fuzzy_idx = _fetch_and_prepare(lookback_days)
 
     inserted = skipped = errors = 0
     for raw in raw_txs:
@@ -680,8 +708,11 @@ def sync(lookback_days: int = 2, check_schema: bool = True) -> dict:
     conn.commit()
 
     if inserted > 0:
-        tag_assignments(conn)
-        log.info("Assignment tagging complete.")
+        try:
+            tag_assignments(conn)
+            log.info("Assignment tagging complete.")
+        except Exception as e:
+            log.error("Assignment tagging failed (inserts were preserved): %s", e)
 
     conn.close()
     log.info("Done — inserted: %d | skipped: %d | errors: %d", inserted, skipped, errors)
@@ -703,36 +734,14 @@ def dry_run(lookback_days: int = 7):
     _assert_schema_current()
     log.info("=== DRY RUN (lookback=%d days) — nothing will be written ===", lookback_days)
 
-    client   = get_client()
-    resp     = schwab_get_account_numbers(client)
-    resp.raise_for_status()
-    accounts  = resp.json()
-    acct_hash = accounts[0]["hashValue"]
+    raw_txs, conn, cur, exact_set, activity_id_set, fuzzy_idx = _fetch_and_prepare(lookback_days)
 
-    end_dt   = datetime.now(timezone.utc)
-    start_dt = end_dt - timedelta(days=lookback_days)
-
-    resp = client.get_transactions(
-        account_hash=acct_hash,
-        start_date=start_dt,
-        end_date=end_dt,
-    )
-    resp.raise_for_status()
-    raw_txs = resp.json()
-    log.info("Fetched %d raw transactions from Schwab", len(raw_txs))
-
-    # Print raw structure of first TRADE transaction for debugging
     import json
     trade_sample = next((t for t in raw_txs if t.get("type") == "TRADE"), raw_txs[0] if raw_txs else None)
     if trade_sample:
         log.info("--- Sample TRADE transaction (raw) ---")
         log.info(json.dumps(trade_sample, indent=2, default=str))
         log.info("--------------------------------------")
-
-    conn        = sqlite3.connect(DB_PATH)
-    cur         = conn.cursor()
-    buffer_date = (datetime.now() - timedelta(days=lookback_days + 3)).strftime("%Y-%m-%d")
-    exact_set, activity_id_set, fuzzy_idx = build_dedup_structures(cur, buffer_date)
 
     new_rows = already_in_db = parse_errors = 0
     for raw in raw_txs:
@@ -775,7 +784,7 @@ def backfill_descriptions():
     cur  = conn.cursor()
 
     cur.execute("""
-        SELECT id, action, category, description, symbol, underlying, amount
+        SELECT id, action, category, description, symbol, underlying, amount, trade_date
         FROM transactions
         WHERE category IN ('income', 'transfer')
           AND (description IS NULL OR description = '')
@@ -822,15 +831,9 @@ def backfill_descriptions():
                 api_desc_map[(tx_date, round(float(net_amt), 2))] = tx_desc
 
     updated = 0
-    for row_id, action, category, old_desc, old_sym, old_und, amount in empty_rows:
-        # Try to get trade_date for this row
-        cur.execute("SELECT trade_date FROM transactions WHERE id = ?", (row_id,))
-        td = cur.fetchone()
-        if not td:
+    for row_id, action, category, old_desc, old_sym, old_und, amount, trade_date in empty_rows:
+        if not trade_date:
             continue
-        trade_date = td[0]
-
-        # Look up API description
         api_desc = api_desc_map.get((trade_date, amount))
         if not api_desc and amount is not None:
             api_desc = api_desc_map.get((trade_date, round(float(amount), 2)))

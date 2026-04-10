@@ -17,8 +17,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
-DB_PATH  = BASE_DIR.parent / "trades.db"
+from config import DB_PATH
 
 # ── migration registry ────────────────────────────────────────────────────────
 # Each entry: (version_str, description, list_of_sql_statements)

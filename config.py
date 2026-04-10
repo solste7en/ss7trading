@@ -14,3 +14,4 @@ APP_KEY       = os.environ["SCHWAB_APP_KEY"]
 APP_SECRET    = os.environ["SCHWAB_APP_SECRET"]
 CALLBACK_URL  = os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182/callback")
 TOKEN_PATH    = str(BASE_DIR / os.environ.get("SCHWAB_TOKEN_PATH", "token.json"))
+DB_PATH       = BASE_DIR.parent / "trades.db"

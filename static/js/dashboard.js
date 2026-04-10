@@ -798,6 +798,14 @@ function _ipFormatStrike(s) {
   return n.toFixed(2).replace(/\.?0+$/, '');
 }
 
+/** Human-readable leg close state (API uses title case / long labels). */
+function _ipLegCloseLabel(closeAction) {
+  if (closeAction == null || closeAction === '') return 'open';
+  if (closeAction === 'Expired') return 'expired';
+  if (closeAction === 'Exchange or Exercise') return 'exercised';
+  return closeAction;
+}
+
 function setIncomePnlSort(key) {
   if (incomePnlSort.key === key) {
     incomePnlSort.dir = incomePnlSort.dir === 'desc' ? 'asc' : 'desc';
@@ -1004,7 +1012,7 @@ function _renderIncomeTrades(trades) {
           <td colspan="2" style="padding-left:24px;color:#94a3b8;font-size:11px">
             ${lDir} ${l.leg_type} $${_ipFormatStrike(l.strike)} exp ${l.expiry || '?'}
           </td>
-          <td style="font-size:11px;color:#94a3b8">${esc(l.open_action||'')} → ${esc(l.close_action||'open')}</td>
+          <td style="font-size:11px;color:#94a3b8">${esc(l.open_action||'')} → ${esc(_ipLegCloseLabel(l.close_action))}</td>
           <td></td><td></td>
           <td style="font-size:11px">${l.open_date||'—'}</td>
           <td style="font-size:11px">${l.close_date||'—'}</td>

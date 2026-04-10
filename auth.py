@@ -8,7 +8,6 @@ First-time setup:  python auth.py
 
 Subsequent runs: just import get_client() — no browser needed.
 """
-import sys
 from pathlib import Path
 import schwab
 from config import APP_KEY, APP_SECRET, CALLBACK_URL, TOKEN_PATH

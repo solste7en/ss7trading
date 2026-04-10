@@ -21,7 +21,7 @@ from db import (
 
 log = logging.getLogger(__name__)
 
-START_DATE = datetime.date(2026, 1, 1)
+START_DATE = datetime.date(datetime.date.today().year, 1, 1)
 PERFECT_WIN_THRESHOLD = 0.03
 
 
@@ -34,9 +34,8 @@ def run_sync():
     resp.raise_for_status()
     acct_hash = resp.json()[0]["hashValue"]
 
-    # 2. Fetch all transactions for 2026
     end_dt = datetime.datetime.now(datetime.timezone.utc)
-    start_dt = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    start_dt = datetime.datetime(START_DATE.year, 1, 1, tzinfo=datetime.timezone.utc)
 
     resp = client.get_transactions(
         account_hash=acct_hash,
@@ -101,7 +100,7 @@ def run_sync():
             continue
         if not parsed.get("is_option"):
             continue
-        if parsed.get("trade_date", "") < "2026-01-01":
+        if parsed.get("trade_date", "") < START_DATE.isoformat():
             continue
         # Reclassify "Expired" events that have a matching equity TRADE at the strike price:
         # these are assignments, not true expirations.
@@ -144,6 +143,20 @@ def run_sync():
 
 
 # ── FIFO Matching ─────────────────────────────────────────────────────────────
+
+# Closing transactions only pair with open lots of the matching *direction*.
+# Buy to Close / Sell to Close are explicit.  Expiration and exercise are not
+# direction-specific in the API label — a long that expires OTM is still
+# "Expired" and must close a *long* lot, not only shorts (the old bug showed
+# BTO legs as perpetually "open").  Assignment almost always closes a short.
+_CLOSE_MATCH_DIRECTIONS: dict[str, tuple[str, ...]] = {
+    "Buy to Close":           ("short",),
+    "Sell to Close":          ("long",),
+    "Expired":                ("short", "long"),
+    "Assigned":               ("short",),
+    "Exchange or Exercise":   ("long", "short"),
+}
+
 
 def _match_legs(option_rows):
     """Match option opens with their closes using FIFO per position key."""
@@ -210,14 +223,12 @@ def _match_legs(option_rows):
                 "price": price, "date": date, "activity_id": aid,
                 "fees": fees, "action": action,
             })
-        elif action in ("Buy to Close", "Sell to Close", "Expired", "Assigned",
-                        "Exchange or Exercise"):
-            close_direction = "short" if action in ("Buy to Close", "Expired", "Assigned",
-                                                     "Exchange or Exercise") else "long"
+        elif action in _CLOSE_MATCH_DIRECTIONS:
+            allowed_dirs = _CLOSE_MATCH_DIRECTIONS[action]
             remaining = qty
             lots = open_lots[key]
             for lot in lots:
-                if lot["direction"] != close_direction or lot["qty_remaining"] <= 0:
+                if lot["direction"] not in allowed_dirs or lot["qty_remaining"] <= 0:
                     continue
                 fill = min(lot["qty_remaining"], remaining)
                 lot["qty_remaining"] -= fill
