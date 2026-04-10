@@ -61,11 +61,11 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 | **Positions** | Live positions with market value, current price, unrealized P&L, and day P&L; sortable columns; ETF badge; options grouped under underlying with expand/collapse; PUT/CALL type and expiry columns |
 | **Quote** | Live quote for any symbol + quotes for held positions or custom watchlists (saved to DB) |
 | **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword; **Sync from Schwab** with last-sync time and results modal |
-| **Realized G/L** | Closed-position gain/loss, filterable by ticker and short/long term |
 | **📊 Income P&L** | Option income strategy performance tracker: clickable KPI cards, paginated trade table with expandable leg detail, filters by ticker/status/strategy/outcome; "Sync from Schwab" rebuilds from API |
+| **Realized G/L** | Closed-position gain/loss from **Schwab portal Realized G/L CSV** (not the API); banner explains refresh workflow; last import time from `MAX(imported_at)` in `realized_gains` |
 | **Trade** | Place equity/ETF or single-leg option orders; live quote card, TradingView chart, option chain browser (click-to-fill), and current holdings panel |
-| **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); position unwind suggestion engine; current holdings panel + recent trades/open orders sidebar |
-| **💰 Income** | Multi-leg options strategies: naked option, vertical spread, collar, equity+option bundle; optional 2–7 rung **price ladder** (per-rung qty/limit or net); suggestion engine with clickable cards; live P&L preview; paginated option chain (20 strikes/page) with strike dropdowns auto-filled from bid/ask |
+| **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); position unwind suggestion engine; two-column layout with independent scroll on wide screens — form on the left; **Holdings**, **Open Orders**, then **Recent Trades** on the right |
+| **💰 Income** | Multi-leg options strategies: naked option, vertical spread, collar, equity+option bundle; optional 2–7 rung **price ladder** (per-rung qty/limit or net); two-column layout (scrollable form + chain and suggestions on the left; holdings, open orders, recent option trades on the right); suggestion cards below the chain; live P&L preview; paginated option chain |
 | **Open Orders** | All working/queued orders with sortable columns, filters, and cancel buttons |
 
 ---
@@ -82,12 +82,10 @@ The **Trade** tab supports both equity and single-leg option order entry in a tw
 The **Ladder** tab lets you submit multiple limit orders at different price levels in one action:
 
 1. Enter ticker, action (Buy/Sell/Sell Short/Buy to Cover), duration, session
-2. The **holdings panel** at the top of the sidebar shows your current position for the ticker
+2. On wide screens the **left column** (form, unwind suggestion, rungs) and **right column** scroll independently. The right column lists **Holdings**, then **Open Orders**, then **Recent Trades** (equity + optional options), each paginated where applicable.
 3. Use **Quick Fill** to auto-generate rungs (even split, scale up, scale down)
 4. Or manually add/remove rungs with custom qty and price
 5. **Preview** → **Confirm** submits all orders; per-rung success/failure is shown
-
-The sidebar also shows recent trades (equity + options with strike/expiry) for the selected ticker, paginated 20 per page, and all open orders for that ticker.
 
 ## 💰 Income tab (multi-leg options strategies)
 
@@ -102,10 +100,10 @@ The **Income** tab is designed for generating income using options against exist
 
 **Workflow:**
 
-1. Enter a ticker — the **suggestion engine** immediately analyses your current position and the option chain, returning ranked strategy cards (covered calls with annualized yield, collar candidates, spread structures)
+1. Enter a ticker — the right column lists **Holdings**, then **Open Orders**, then **Recent Option Trades** (top to bottom). On wide screens the left column (form + chain + suggestions) and the right column scroll independently. The **suggestion engine** runs in the background; ranked cards appear at the **bottom of the left column** (under the option chain) so you can review holdings and working orders without losing the form above.
 2. Click any suggestion card to pre-fill the form with recommended strikes, expiry, and quantity
 3. Browse the inline **option chain** (paginated, 20 strikes/page, centered on ATM) and use **strike dropdowns** — selecting a strike auto-fills the net credit/debit from bid/ask
-4. The **P&L preview panel** updates live as you adjust parameters — shows max profit, max loss, breakeven(s), and net credit/debit
+4. The **P&L preview panel** updates live as you adjust parameters — shows max profit, max loss, breakeven(s), net credit/debit, and **Max score (perfect, ÷DTE)** (hypothetical efficiency if max profit is realized by expiration)
 5. **Preview** → **Confirm** submits via `POST /api/order/strategy`
 
 **Optional price ladder (naked, spread, and collar only):** Check **Enable price ladder** under the ticker / expiration row, choose **Steps** (2–7, default 3), then enter **contracts** and **limit or net price** per rung. The usual single-row quantity and price fields are hidden while the ladder is on so values stay consistent. Auto-priced quotes from the chain fill **rung 1** (and the hidden single-row fields) until you edit that rung. Each rung is submitted as its own multi-leg order via `POST /api/order/strategy-ladder` (same payload shape as a single strategy order, repeated per rung). **Equity + Option (bundle)** mode hides the ladder.
@@ -134,6 +132,9 @@ Tracks the full history of option income trades from the current calendar year o
 - Expandable rows — click any row to show individual leg detail (strike, expiry, direction, open/close action and price, dates)
 - Filters: ticker, status (Open / Closed / Expired / Assigned), strategy (Naked / Spread / Collar), page size
 - Strategy, status, and outcome badges with distinct colors
+- **Score** (before Outcome): for closed trades, `net P&L ÷ max(1, days held) ÷ short-leg strike × 100` (negative on losses). Open trades show —. This is a simple time- and strike-scaled heuristic, not risk-adjusted notional.
+
+On the **💰 Income** tab, the **P&amp;L Preview** panel includes **Max score (perfect, ÷DTE)** for naked, spread, and collar (not bundle): it uses max profit (or net credit) ÷ calendar days to selected expiration ÷ short strike × 100, as an upper bound if the trade expired perfectly—ignoring fees and path risk. With **price ladder** enabled, the same idea is shown for **rung 1** under the ladder preview table.
 
 ---
 
@@ -226,6 +227,17 @@ python3 -m pytest tests/ --benchmark-disable -q
 
 Configuration lives in `pytest.ini`. Tests use in-memory SQLite where possible so they do not require your real `trades.db` or live Schwab credentials.
 
+### Verification (Realized G/L vs Schwab API)
+
+The **Schwab Trader API** does not expose a Realized Gain/Loss export equivalent to **Accounts → Realized Gain/Loss** on the website. Long/short-term splits, wash sales, disallowed loss, and cost-basis method come from Schwab’s tax engine and are not available on transaction endpoints in a drop-in form. This app keeps **Realized G/L** as **portal CSV data** in `realized_gains` (re-import when you need updates); **Trade History** and **Income P&L** continue to use API-backed `transactions` where appropriate.
+
+To reproduce the analysis (schema snapshot, coverage vs `transactions`, optional live JSON key scan), run from `schwab_app/`:
+
+```bash
+./venv/bin/python scripts/verify_realized_gl_coverage.py
+./venv/bin/python scripts/verify_realized_gl_coverage.py --api --days 60   # needs token.json + .env
+```
+
 ### Performance benchmarks (pytest-benchmark)
 
 Benchmarks measure parsing, deduplication index builds, income matching, and a mocked sync-style pipeline:
@@ -265,6 +277,7 @@ The dashboard uses no JavaScript bundler: Flask serves [templates/dashboard.html
 | `auth.py` | OAuth setup (run once for first-time login) |
 | `config.py` | Loads credentials from `.env` |
 | `sync_trades.py` | Schwab API → `trades.db` sync script |
+| `scripts/verify_realized_gl_coverage.py` | Optional audit: `realized_gains` vs API / `transactions` |
 | `migrate_db.py` | Versioned SQLite schema migrations for `trades.db` |
 | `income_sync.py` | Income trade sync: FIFO matching, strategy grouping, P&L calculation |
 | `recovery.py` | Assignment recovery tracking (LIFO equity matching) |

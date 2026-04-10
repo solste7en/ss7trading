@@ -2,6 +2,19 @@ const fmt   = (v,d=2) => v==null ? '—' : Number(v).toLocaleString('en-US',{min
 const fmtD  = (v,d=2) => v==null ? '—' : (v>=0?'+':'') + fmt(v,d);
 const cls   = (v)     => v==null ? '' : (v>=0?'pos':'neg');
 const esc   = (s)     => String(s||'').replace(/</g,'&lt;');
+
+/** SQLite / ISO-ish datetime for Realized G/L banner */
+function formatRgLastImport(raw) {
+  if (raw == null || raw === '') return 'Unknown (no imported_at in DB, or column missing)';
+  const s = String(raw).trim();
+  const normalized = s.includes('T') ? s : s.replace(' ', 'T');
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString(undefined, {
+    dateStyle: 'medium', timeStyle: 'short',
+  });
+}
+
 let _debTimer = null;
 function debounce(fn) { clearTimeout(_debTimer); _debTimer = setTimeout(fn, 400); }
 
@@ -761,6 +774,8 @@ async function loadGains(resetPage=true) {
 
     document.getElementById('g-count').textContent =
       `${res.total.toLocaleString()} total closed positions`;
+    const gImp = document.getElementById('g-last-import');
+    if (gImp) gImp.textContent = formatRgLastImport(res.last_imported_at);
 
     document.getElementById('g-tbody').innerHTML = res.data.map(r => {
       const wsTag = r.wash_sale ? '<span class="badge badge-ws">WS</span>' : '—';
@@ -845,6 +860,28 @@ function _ipLegCloseLabel(closeAction) {
   if (closeAction === 'Expired') return 'expired';
   if (closeAction === 'Exchange or Exercise') return 'exercised';
   return closeAction;
+}
+
+/** Short (sold) leg strike for score denominator; else first leg. */
+function _incomeScoreStrike(legs) {
+  if (!legs || !legs.length) return null;
+  const shortLeg = legs.find(l => l.direction === 'short');
+  const pick = shortLeg || legs[0];
+  const k = pick != null && pick.strike != null ? Number(pick.strike) : NaN;
+  return Number.isFinite(k) && k > 0 ? k : null;
+}
+
+/**
+ * Closed-trade efficiency: net_pnl / max(1,days_held) * 100 / strike.
+ * Open trades: null (show —).
+ */
+function _incomeEfficiencyScore(t) {
+  if (!t || t.status === 'open') return null;
+  if (t.net_pnl == null) return null;
+  const strike = _incomeScoreStrike(t.legs || []);
+  if (strike == null) return null;
+  const days = t.days_held != null && t.days_held > 0 ? t.days_held : 1;
+  return (t.net_pnl / days) * (100 / strike);
 }
 
 function setIncomePnlSort(key) {
@@ -1015,6 +1052,10 @@ function _renderIncomeTrades(trades) {
     const closeStr = t.close_cost != null && t.status !== 'open' ? '$' + t.close_cost.toFixed(2) : '—';
     const arrow = hasLegs ? (isExpanded ? '▼' : '▶') : '';
 
+    const effScore = _incomeEfficiencyScore(t);
+    const scoreClass = effScore != null ? (effScore >= 0 ? 'pos' : 'neg') : '';
+    const scoreStr = effScore != null ? effScore.toFixed(4) : '—';
+
     let recCell = '—';
     let recPnlCell = '—';
     if (t.status === 'assigned' && t.recovery_target != null && t.recovery_target > 0) {
@@ -1040,6 +1081,7 @@ function _renderIncomeTrades(trades) {
       <td class="${pnlClass}">${pnlStr}</td>
       <td class="${pnlClass}">${pnlPctStr}</td>
       <td>${statusBadge}</td>
+      <td class="${scoreClass}" title="net P&amp;L ÷ max(1,days) ÷ short strike × 100">${scoreStr}</td>
       <td>${outcomeBadge}</td>
     </tr>`;
 
@@ -1061,7 +1103,7 @@ function _renderIncomeTrades(trades) {
           <td style="font-size:11px">$${(l.open_price||0).toFixed(2)} × ${l.open_qty||0}</td>
           <td style="font-size:11px">${l.close_price != null ? '$'+l.close_price.toFixed(2) : '—'}</td>
           <td class="${lPnlClass}" style="font-size:11px">${lPnl}</td>
-          <td colspan="3"></td>
+          <td colspan="4"></td>
         </tr>`;
       }
       // Recovery section for assigned trades
@@ -1071,7 +1113,7 @@ function _renderIncomeTrades(trades) {
           html += _renderRecoverySection(rec, t.underlying);
         } else {
           html += `<tr class="ip-recovery-header"><td></td>
-            <td colspan="14" style="padding:8px 24px;color:#64748b;font-size:11px;font-style:italic">
+            <td colspan="15" style="padding:8px 24px;color:#64748b;font-size:11px;font-style:italic">
               Loading recovery data…</td></tr>`;
         }
       }
@@ -1160,7 +1202,7 @@ function _renderRecoverySection(rec, ticker) {
   const dismissedLabel = dismissed > 0 ? ` <span class="ip-recovery-dismissed">(${dismissed} written off)</span>` : '';
 
   html += `<tr class="ip-recovery-header"><td></td>
-    <td colspan="14" style="padding:6px 24px">
+    <td colspan="15" style="padding:6px 24px">
       <div class="ip-recovery-summary">
         <span class="ip-recovery-title">Recovery</span>
         <span class="ip-recovery-progress-text">${recovered} / ${effectiveTarget} shares (${pct}%)</span>
@@ -1186,7 +1228,7 @@ function _renderRecoverySection(rec, ticker) {
       <td colspan="4"></td>
       <td class="${rtPnlClass}" style="font-size:11px">${rtPnlStr}</td>
       <td style="font-size:11px;color:#64748b">${rt.pnl_per_share >= 0 ? '+' : ''}$${rt.pnl_per_share.toFixed(2)}/sh</td>
-      <td colspan="2"></td>
+      <td colspan="3"></td>
     </tr>`;
   }
 
@@ -3182,6 +3224,68 @@ async function cancelAllStratOrders() {
 }
 
 // ── P&L preview ──────────────────────────────────────────────────
+function _stratExpiryDteDays() {
+  const v = document.getElementById('strat-expiry').value;
+  if (!v) return null;
+  const end = new Date(v + 'T12:00:00');
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+  const diff = Math.round((end - start) / 86400000);
+  return Math.max(1, diff);
+}
+
+function _stratShortStrikeForScore() {
+  if (stratMode === 'naked') {
+    const x = parseFloat(document.getElementById('sn-strike').value);
+    return Number.isFinite(x) && x > 0 ? x : null;
+  }
+  if (stratMode === 'vertical') {
+    const x = parseFloat(document.getElementById('sv-sell-strike').value);
+    return Number.isFinite(x) && x > 0 ? x : null;
+  }
+  if (stratMode === 'collar') {
+    const x = parseFloat(document.getElementById('sc-sell-strike').value);
+    return Number.isFinite(x) && x > 0 ? x : null;
+  }
+  return null;
+}
+
+/** Max dollars kept in a “perfect” short-premium outcome (credit kept, no close cost). */
+function _stratPerfectProfitDollars(info) {
+  if (!info) return null;
+  if (typeof info.max_profit === 'number') return info.max_profit;
+  if (typeof info.net_credit === 'number') return info.net_credit;
+  if (info.net_cost === 0) return 0;
+  return null;
+}
+
+/**
+ * Pre-trade hypothetical: max_profit (or net credit) ÷ DTE ÷ short strike × 100.
+ * Uses calendar days to expiration; ignores fees and path risk.
+ */
+function _stratPreviewMaxEfficiencyScore() {
+  if (stratMode === 'bundle') return null;
+  const dte = _stratExpiryDteDays();
+  if (dte == null) return null;
+  const strike = _stratShortStrikeForScore();
+  if (strike == null) return null;
+  let info = null;
+  try {
+    if (stratMode === 'naked') info = _calcNakedPnl();
+    else if (stratMode === 'vertical') info = _calcVerticalPnl();
+    else if (stratMode === 'collar') info = _calcCollarPnl();
+  } catch (e) { info = null; }
+  if (!info) return null;
+  const dollars = _stratPerfectProfitDollars(info);
+  if (dollars == null || typeof dollars !== 'number') return null;
+  const score = (dollars / dte) * (100 / strike);
+  return {
+    valueStr: score.toFixed(4),
+    title: 'Hypothetical if max profit is realized by expiration: max profit (or net credit) ÷ days to expiry ÷ short strike × 100. Ignores fees, assignment, and path.',
+  };
+}
+
 function updateStratPnl() {
   const box = document.getElementById('strat-pnl');
   if (_stratLadderEnabled() && stratMode !== 'bundle') {
@@ -3226,8 +3330,13 @@ function updateStratPnl() {
     return '<div class="strat-pnl-item"><label>' + esc(label) + '</label><div class="val ' + valCls + '">' + display + '</div></div>';
   }).join('');
 
+  const scorePrev = _stratPreviewMaxEfficiencyScore();
+  const scoreHtml = scorePrev
+    ? '<div class="strat-pnl-item" title="' + esc(scorePrev.title) + '"><label>Max score (perfect, ÷DTE)</label><div class="val pos">' + esc(scorePrev.valueStr) + '</div></div>'
+    : '';
+
   box.innerHTML = '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;font-weight:600">P&L Preview</div>' +
-    '<div class="strat-pnl-grid">' + items + '</div>';
+    '<div class="strat-pnl-grid">' + items + scoreHtml + '</div>';
 }
 
 function _stratLadderPnlHtml() {
@@ -3280,11 +3389,30 @@ function _stratLadderPnlHtml() {
 
   const foot = '<tr class="strat-ladder-pnl-totals"><td><b>Total</b></td><td></td><td><b>' + totCred + '</b></td><td><b>' + totDeb + '</b></td><td><b>' + totMp + ' / ' + totMl + '</b></td></tr>';
 
+  let scoreNote = '';
+  const dteL = _stratExpiryDteDays();
+  const strikeL = _stratShortStrikeForScore();
+  const r0 = rungs[0];
+  if (dteL != null && strikeL != null && r0) {
+    let m0 = null;
+    try {
+      if (stratMode === 'naked') m0 = _calcNakedPnlFor(r0.qty, r0.price);
+      else if (stratMode === 'vertical') m0 = _calcVerticalPnlFor(r0.qty, r0.price);
+      else if (stratMode === 'collar') m0 = _calcCollarPnlFor(r0.qty, r0.price);
+    } catch (e) { m0 = null; }
+    const dollars0 = _stratPerfectProfitDollars(m0);
+    if (dollars0 != null && typeof dollars0 === 'number') {
+      const sc0 = (dollars0 / dteL) * (100 / strikeL);
+      const stitle = 'Hypothetical for rung 1: max profit ÷ DTE ÷ short strike × 100; ignores fees and path.';
+      scoreNote = '<p class="strat-ladder-muted" style="margin-top:8px;font-size:11px" title="' + esc(stitle) + '">Max score (perfect, ÷DTE), rung 1: <b class="pos">' + sc0.toFixed(4) + '</b></p>';
+    }
+  }
+
   return (
     '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;font-weight:600">P&amp;L Preview (ladder)</div>' +
     '<div class="strat-ladder-pnl-wrap"><table class="strat-ladder-pnl-table">' +
     '<thead><tr><th>Step</th><th>Qty @ price</th><th>Credit</th><th>Debit</th><th>Max P / Max L</th></tr></thead>' +
-    '<tbody>' + rows + foot + '</tbody></table></div>'
+    '<tbody>' + rows + foot + '</tbody></table></div>' + scoreNote
   );
 }
 

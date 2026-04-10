@@ -103,12 +103,22 @@ def get_realized_gains(page=1, limit=25, ticker="", term=""):
 
         rows = [dict(r) for r in cur.fetchall()]
 
+        last_imported_at = None
+        try:
+            cur.execute("SELECT MAX(imported_at) FROM realized_gains")
+            row = cur.fetchone()
+            if row and row[0]:
+                last_imported_at = row[0]
+        except sqlite3.OperationalError:
+            pass
+
     return {
         "data": rows,
         "total": total,
         "page": page,
         "limit": limit,
         "pages": math.ceil(total / limit) if total else 0,
+        "last_imported_at": last_imported_at,
     }
 
 

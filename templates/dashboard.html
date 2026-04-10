@@ -35,8 +35,8 @@
   <div class="tab-group">
     <span class="tab-group-label">Records</span>
     <div class="tab"        onclick="switchTab('history')">Trade History</div>
-    <div class="tab"        onclick="switchTab('gains')">Realized G/L</div>
     <div class="tab"        onclick="switchTab('incomepnl')">📊 Income P&amp;L</div>
+    <div class="tab"        onclick="switchTab('gains')">Realized G/L</div>
   </div>
 </div>
 
@@ -154,36 +154,6 @@
   <div class="pagination" id="h-pagination"></div>
 </div>
 
-<!-- ── Realized G/L ── -->
-<div class="panel" id="tab-gains">
-  <div class="filters">
-    <input type="text" id="g-ticker" placeholder="Ticker (e.g. NVDA)" oninput="debounce(loadGains)">
-    <select id="g-term" onchange="loadGains()">
-      <option value="">All (LT + ST)</option>
-      <option value="lt">Long Term only</option>
-      <option value="st">Short Term only</option>
-    </select>
-    <select id="g-limit" onchange="loadGains()">
-      <option value="25">25 / page</option>
-      <option value="50">50 / page</option>
-      <option value="100">100 / page</option>
-    </select>
-    <span class="count" id="g-count"></span>
-  </div>
-  <div class="loading" id="g-loading">Loading…</div>
-  <div id="g-error" class="error" style="display:none"></div>
-  <div class="table-wrap" id="g-table" style="display:none">
-    <table><thead><tr>
-      <th>Closed</th><th>Symbol</th><th>Ticker</th><th>Type</th>
-      <th>Qty</th><th>Proceeds</th><th>Cost Basis</th>
-      <th>Total G/L</th><th>Total G/L %</th>
-      <th>LT G/L</th><th>ST G/L</th>
-      <th>Wash Sale</th><th>Disallowed</th>
-    </tr></thead><tbody id="g-tbody"></tbody></table>
-  </div>
-  <div class="pagination" id="g-pagination"></div>
-</div>
-
 <!-- ── Income P&L ── -->
 <div class="panel" id="tab-incomepnl">
   <!-- Top bar: filters + sync -->
@@ -270,10 +240,46 @@
       <th class="sortable ip-sortable" onclick="setIncomePnlSort('net_pnl')">Net P&amp;L <span class="sort-arrow" id="ip-sa-net_pnl"></span></th>
       <th>P&amp;L %</th>
       <th>Status</th>
+      <th title="net P&amp;L ÷ max(1,days) ÷ short strike × 100 (heuristic)">Score</th>
       <th>Outcome</th>
     </tr></thead><tbody id="ip-tbody"></tbody></table>
   </div>
   <div class="pagination" id="ip-pagination"></div>
+</div>
+
+<!-- ── Realized G/L (portal CSV — last in Records) ── -->
+<div class="panel" id="tab-gains">
+  <div class="rg-static-banner">
+    <div class="rg-static-banner__title">Schwab portal export — not live API data</div>
+    <p class="rg-static-banner__body">The Schwab Trader API does not provide a Realized Gain/Loss report like the website. This table is filled from your <strong>Accounts → Realized Gain/Loss</strong> CSV export. Re-import that file periodically to refresh totals, wash-sale flags, and long- vs short-term amounts.</p>
+    <p class="rg-static-banner__meta">Latest row import timestamp (max <code>imported_at</code> in DB): <strong id="g-last-import">—</strong></p>
+  </div>
+  <div class="filters">
+    <input type="text" id="g-ticker" placeholder="Ticker (e.g. NVDA)" oninput="debounce(loadGains)">
+    <select id="g-term" onchange="loadGains()">
+      <option value="">All (LT + ST)</option>
+      <option value="lt">Long Term only</option>
+      <option value="st">Short Term only</option>
+    </select>
+    <select id="g-limit" onchange="loadGains()">
+      <option value="25">25 / page</option>
+      <option value="50">50 / page</option>
+      <option value="100">100 / page</option>
+    </select>
+    <span class="count" id="g-count"></span>
+  </div>
+  <div class="loading" id="g-loading">Loading…</div>
+  <div id="g-error" class="error" style="display:none"></div>
+  <div class="table-wrap" id="g-table" style="display:none">
+    <table><thead><tr>
+      <th>Closed</th><th>Symbol</th><th>Ticker</th><th>Type</th>
+      <th>Qty</th><th>Proceeds</th><th>Cost Basis</th>
+      <th>Total G/L</th><th>Total G/L %</th>
+      <th>LT G/L</th><th>ST G/L</th>
+      <th>Wash Sale</th><th>Disallowed</th>
+    </tr></thead><tbody id="g-tbody"></tbody></table>
+  </div>
+  <div class="pagination" id="g-pagination"></div>
 </div>
 
 <!-- ── Trade ── -->
@@ -454,6 +460,7 @@
 <!-- ── Ladder Trade ── -->
 <div class="panel" id="tab-ladder">
   <div class="ladder-layout">
+    <!-- Left: ladder form + rungs (scrolls independently on wide screens) -->
     <div class="ladder-form">
       <div class="form-grid" style="margin-bottom:14px">
         <div class="form-group">
@@ -563,45 +570,47 @@
       <div id="lad-result"></div>
     </div>
 
+    <!-- Right: Holdings → Open Orders → Recent Trades (independent scroll on wide screens) -->
     <div class="ladder-sidebar">
-      <!-- Position summary at top of sidebar -->
       <div id="lad-position-panel" class="pos-sum-panel" style="display:none"></div>
 
-      <div class="ladder-sidebar-header">
-        <h3>Recent Trades</h3>
-        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;cursor:pointer">
-          <input type="checkbox" id="lad-include-options" checked
-                 onchange="ladderRecentState.page=1; loadLadderRecent()"
-                 style="accent-color:#6366f1">
-          Include options
-        </label>
-      </div>
-      <div class="ladder-sidebar-count" id="lad-recent-count"></div>
-      <div class="ladder-sidebar-table-wrap">
-        <div id="lad-recent">
-          <div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>
+      <div class="ladder-sidebar-section">
+        <div class="ladder-sidebar-header">
+          <h3>Open Orders</h3>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;cursor:pointer">
+              <input type="checkbox" id="lad-orders-include-options" checked
+                     onchange="loadLadderOrders()"
+                     style="accent-color:#6366f1">
+              Include options
+            </label>
+            <button class="cancel-all-btn" id="lad-cancel-all-btn" style="display:none"
+                    onclick="cancelAllLadderOrders()">Cancel All</button>
+          </div>
+        </div>
+        <div class="ladder-sidebar-count" id="lad-orders-count"></div>
+        <div class="ladder-sidebar-table-wrap">
+          <div id="lad-orders">
+            <div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>
+          </div>
         </div>
       </div>
 
-      <div class="ladder-sidebar-divider"></div>
-
-      <div class="ladder-sidebar-header">
-        <h3>Open Orders</h3>
-        <div style="display:flex;align-items:center;gap:8px">
+      <div class="ladder-sidebar-section">
+        <div class="ladder-sidebar-header">
+          <h3>Recent Trades</h3>
           <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#94a3b8;cursor:pointer">
-            <input type="checkbox" id="lad-orders-include-options" checked
-                   onchange="loadLadderOrders()"
+            <input type="checkbox" id="lad-include-options" checked
+                   onchange="ladderRecentState.page=1; loadLadderRecent()"
                    style="accent-color:#6366f1">
             Include options
           </label>
-          <button class="cancel-all-btn" id="lad-cancel-all-btn" style="display:none"
-                  onclick="cancelAllLadderOrders()">Cancel All</button>
         </div>
-      </div>
-      <div class="ladder-sidebar-count" id="lad-orders-count"></div>
-      <div class="ladder-sidebar-table-wrap">
-        <div id="lad-orders">
-          <div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>
+        <div class="ladder-sidebar-count" id="lad-recent-count"></div>
+        <div class="ladder-sidebar-table-wrap">
+          <div id="lad-recent">
+            <div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>
+          </div>
         </div>
       </div>
     </div>
@@ -611,7 +620,7 @@
 <!-- ── Options Strategy ── -->
 <div class="panel" id="tab-strategy">
   <div class="strat-layout">
-    <!-- LEFT: strategy forms -->
+    <!-- LEFT: strategy forms + chain + suggestions (own scroll) -->
     <div class="strat-forms-col">
       <div class="strat-toggle">
         <button class="toggle-btn active" id="strat-btn-naked"    onclick="setStrategyMode('naked')">Naked Option</button>
@@ -876,36 +885,21 @@
           Enter a ticker and select an expiration to browse the chain
         </div>
       </div>
-    </div>
 
-    <!-- RIGHT: sidebar -->
-    <div class="strat-sidebar">
-      <!-- Suggestions panel -->
-      <div id="strat-suggest-panel" class="strat-suggest-panel">
+      <!-- Suggestions: bottom of left column (forms + chain scroll above independently) -->
+      <div id="strat-suggest-panel" class="strat-suggest-panel strat-suggest-panel--footer">
         <div class="strat-suggest-header">Suggestions</div>
         <div id="strat-suggest-cards">
           <div style="color:#475569;font-size:12px">Enter a ticker to get strategy suggestions</div>
         </div>
       </div>
+    </div>
 
-      <!-- Position summary -->
+    <!-- RIGHT: holdings & orders (scrolls independently from left on wide screens) -->
+    <div class="strat-sidebar">
       <div id="strat-position-panel" class="pos-sum-panel" style="display:none"></div>
 
-      <!-- Recent option trades -->
       <div class="strat-sidebar-section">
-        <div class="ladder-sidebar-header">
-          <h3>Recent Option Trades</h3>
-        </div>
-        <div class="ladder-sidebar-count" id="strat-recent-count"></div>
-        <div class="ladder-sidebar-table-wrap">
-          <div id="strat-recent">
-            <div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Open orders -->
-      <div class="strat-sidebar-section" style="margin-top:14px">
         <div class="ladder-sidebar-header">
           <h3>Open Orders</h3>
           <button class="cancel-all-btn" id="strat-cancel-all-btn" style="display:none"
@@ -915,6 +909,18 @@
         <div class="ladder-sidebar-table-wrap">
           <div id="strat-orders">
             <div style="color:#475569;font-size:12px">Enter a ticker to see open orders</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strat-sidebar-section strat-sidebar-section--spaced">
+        <div class="ladder-sidebar-header">
+          <h3>Recent Option Trades</h3>
+        </div>
+        <div class="ladder-sidebar-count" id="strat-recent-count"></div>
+        <div class="ladder-sidebar-table-wrap">
+          <div id="strat-recent">
+            <div style="color:#475569;font-size:12px">Enter a ticker to see recent trades</div>
           </div>
         </div>
       </div>
