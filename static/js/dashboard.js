@@ -5,6 +5,49 @@ const esc   = (s)     => String(s||'').replace(/</g,'&lt;');
 let _debTimer = null;
 function debounce(fn) { clearTimeout(_debTimer); _debTimer = setTimeout(fn, 400); }
 
+/**
+ * GET/POST JSON: parse body, throw on `error` field or non-OK status.
+ */
+async function fetchJson(url, init) {
+  const res = await fetch(url, init);
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+  if (data.error) throw new Error(data.error);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return data;
+}
+
+/**
+ * Per-rung result rows for equity ladder and Income strategy-ladder APIs.
+ * @param {Array<{rung:number,qty:number,price:number,status:string,order_id?:string,error?:string}>} results
+ * @param {{ qtyColumnLabel?: string, tableExtraClass?: string, footerHtml?: string }} options
+ */
+function ladderResultTableHtml(results, options) {
+  const opts = options || {};
+  const qtyLabel = opts.qtyColumnLabel || 'Qty';
+  const extraClass = opts.tableExtraClass ? ' ' + opts.tableExtraClass : '';
+  const footer = opts.footerHtml || '';
+
+  const rows = results.map(r => {
+    const icon = r.status === 'ok'
+      ? '<span class="rung-status rung-ok"></span>'
+      : '<span class="rung-status rung-fail"></span>';
+    const resultCell = r.status === 'ok'
+      ? `${icon}Order #${esc(r.order_id)}`
+      : `<span style="display:inline-flex;align-items:flex-start;gap:6px">${icon}<span class="neg ladder-result-msg">${esc(r.error)}</span></span>`;
+    return `<tr>
+        <td>${r.rung}</td>
+        <td>${fmt(r.qty, 0)}</td>
+        <td>$${fmt(r.price)}</td>
+        <td class="ladder-result-cell">${resultCell}</td>
+      </tr>`;
+  }).join('');
+
+  return '<table class="ladder-result-table' + extraClass + '" style="margin-top:10px">' +
+    '<thead><tr><th>#</th><th>' + esc(qtyLabel) + '</th><th>Price</th><th>Result</th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table>' + footer;
+}
+
 // ── tab state ──────────────────────────────────────────────────────
 let currentTab = 'positions';
 
@@ -79,8 +122,7 @@ async function loadOverview() {
   const container = document.getElementById('overview-content');
   container.innerHTML = '<div class="loading">Loading top tickers…</div>';
   try {
-    const data = await fetch('/api/top-tickers').then(r => r.json());
-    if (data.error) throw new Error(data.error);
+    const data = await fetchJson('/api/top-tickers');
     overviewState.loaded = true;
 
     const cards = data.tickers.map(t => {
@@ -381,7 +423,7 @@ function sortPositions(col) {
 
 async function loadPositions() {
   try {
-    const data = await fetch('/api/positions').then(r=>r.json());
+    const data = await fetchJson('/api/positions');
     _posData = data;
     _renderPositions();
     document.getElementById('pos-loading').style.display='none';
@@ -585,8 +627,7 @@ async function loadHistory(resetPage=true) {
     const params = new URLSearchParams({
       page: historyState.page, limit, ticker, search, category
     });
-    const res  = await fetch('/api/transactions?'+params).then(r=>r.json());
-    if (res.error) throw new Error(res.error);
+    const res  = await fetchJson('/api/transactions?' + params);
     historyState.loaded = true;
 
     document.getElementById('h-count').textContent =
@@ -2397,7 +2438,7 @@ async function submitLadder() {
   resultDiv.innerHTML = '<div class="loading">Submitting ' + validRungs.length + ' orders…</div>';
 
   try {
-    const res = await fetch('/api/order/ladder', {
+    const res = await fetchJson('/api/order/ladder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2406,24 +2447,7 @@ async function submitLadder() {
         duration: dur, session: ses,
         rungs: validRungs
       })
-    }).then(r => r.json());
-
-    if (res.error) throw new Error(res.error);
-
-    const rows = res.results.map(r => {
-      const icon = r.status === 'ok'
-        ? '<span class="rung-status rung-ok"></span>'
-        : '<span class="rung-status rung-fail"></span>';
-      const resultCell = r.status === 'ok'
-        ? `${icon}Order #${esc(r.order_id)}`
-        : `<span style="display:inline-flex;align-items:flex-start;gap:6px">${icon}<span class="neg ladder-result-msg">${esc(r.error)}</span></span>`;
-      return `<tr>
-        <td>${r.rung}</td>
-        <td>${fmt(r.qty, 0)}</td>
-        <td>$${fmt(r.price)}</td>
-        <td class="ladder-result-cell">${resultCell}</td>
-      </tr>`;
-    }).join('');
+    });
 
     const ok = res.results.filter(r => r.status === 'ok').length;
     const fail = res.results.length - ok;
@@ -2431,11 +2455,10 @@ async function submitLadder() {
       ? `<div class="success-box">✅ All ${ok} orders submitted successfully!</div>`
       : `<div class="error">⚠️ ${ok} succeeded, ${fail} failed</div>`;
 
-    resultDiv.innerHTML = statusMsg +
-      '<table class="ladder-result-table" style="margin-top:10px">' +
-      '<thead><tr><th>#</th><th>Qty</th><th>Price</th><th>Result</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table>' +
-      '<div style="margin-top:12px;color:#64748b;font-size:12px">Switch to "Open Orders" to track status.</div>';
+    resultDiv.innerHTML = statusMsg + ladderResultTableHtml(res.results, {
+      qtyColumnLabel: 'Qty',
+      footerHtml: '<div class="ladder-result-hint">Switch to "Open Orders" to track status.</div>',
+    });
     ordersState.loaded = false;
     setTimeout(() => loadLadderOrders(), 1000);
   } catch(e) {
@@ -2456,8 +2479,7 @@ async function loadOrders() {
   document.getElementById('ord-empty').style.display='none';
   document.getElementById('ord-error').style.display='none';
   try {
-    const raw = await fetch('/api/orders').then(r => r.json());
-    if (raw.error) throw new Error(raw.error);
+    const raw = await fetchJson('/api/orders');
     _allOrders = raw;
     ordersState.loaded = true;
     document.getElementById('ord-loading').style.display='none';
@@ -3741,28 +3763,11 @@ async function submitStrategy() {
     const n = payload.orders.length;
     div.innerHTML = '<div class="loading">Submitting ' + n + ' strategy orders…</div>';
     try {
-      const res = await fetch('/api/order/strategy-ladder', {
+      const res = await fetchJson('/api/order/strategy-ladder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orders: payload.orders }),
-      }).then(r => r.json());
-
-      if (res.error) throw new Error(res.error);
-
-      const rows = res.results.map(r => {
-        const icon = r.status === 'ok'
-          ? '<span class="rung-status rung-ok"></span>'
-          : '<span class="rung-status rung-fail"></span>';
-        const resultCell = r.status === 'ok'
-          ? `${icon}Order #${esc(r.order_id)}`
-          : `<span style="display:inline-flex;align-items:flex-start;gap:6px">${icon}<span class="neg ladder-result-msg">${esc(r.error)}</span></span>`;
-        return `<tr>
-          <td>${r.rung}</td>
-          <td>${fmt(r.qty, 0)}</td>
-          <td>$${fmt(r.price)}</td>
-          <td class="ladder-result-cell">${resultCell}</td>
-        </tr>`;
-      }).join('');
+      });
 
       const ok = res.results.filter(r => r.status === 'ok').length;
       const fail = res.results.length - ok;
@@ -3770,11 +3775,11 @@ async function submitStrategy() {
         ? `<div class="success-box">All ${ok} strategy orders submitted.</div>`
         : `<div class="error">⚠ ${ok} succeeded, ${fail} failed</div>`;
 
-      div.innerHTML = statusMsg +
-        '<table class="ladder-result-table strat-ladder-result-table" style="margin-top:10px">' +
-        '<thead><tr><th>#</th><th>Contracts</th><th>Price</th><th>Result</th></tr></thead>' +
-        '<tbody>' + rows + '</tbody></table>' +
-        '<div style="margin-top:12px;color:#64748b;font-size:12px">Check Open Orders for partial fills.</div>';
+      div.innerHTML = statusMsg + ladderResultTableHtml(res.results, {
+        qtyColumnLabel: 'Contracts',
+        tableExtraClass: 'strat-ladder-result-table',
+        footerHtml: '<div class="ladder-result-hint">Check Open Orders for partial fills.</div>',
+      });
       ordersState.loaded = false;
       setTimeout(() => loadStrategyOrders(), 1000);
     } catch (e) {

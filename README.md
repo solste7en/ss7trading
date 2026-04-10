@@ -244,6 +244,18 @@ Results print as a table (mean time, rounds, iterations) in the terminal.
 
 ---
 
+## Frontend static assets
+
+The dashboard uses no JavaScript bundler: Flask serves [templates/dashboard.html](templates/dashboard.html) with a single script tag.
+
+- **[static/js/dashboard.js](static/js/dashboard.js)** — All client logic lives in one file so every `onclick="…"` handler in the template can call a **global** function. Near the top, shared helpers include **`fetchJson`** (wraps `fetch`, parses JSON, throws on `error` in the body or non-OK HTTP) and **`ladderResultTableHtml`** (shared table markup for equity ladder and Income strategy-ladder submission results).
+
+- **[static/css/style.css](static/css/style.css)** — One stylesheet. A **`:root`** block defines **CSS custom properties** (`--color-*`) for the dark theme; rules reference `var(--color-…)` so palette tweaks stay centralized.
+
+**If this grows further**, two optional directions (not required today): (1) split into several scripts loaded in a **fixed order** in the template (e.g. utils first, then feature files), still exposing functions on `window` for `onclick`; or (2) add a small **esbuild** (or similar) pipeline that bundles ES modules into one output file and assigns **`window.fnName = …`** for each handler the HTML needs.
+
+---
+
 ## Files
 
 | File | Purpose |
@@ -259,7 +271,7 @@ Results print as a table (mean time, rounds, iterations) in the terminal.
 | `pytest.ini` | Pytest configuration |
 | `tests/` | Unit tests and performance benchmarks |
 | `templates/dashboard.html` | Dashboard HTML template |
-| `static/css/style.css` | Dashboard styles |
-| `static/js/dashboard.js` | Dashboard client-side logic |
+| `static/css/style.css` | Dashboard styles (`:root` design tokens + component rules) |
+| `static/js/dashboard.js` | Dashboard client-side logic (globals; `fetchJson`, ladder table helper) |
 | `requirements.txt` | Python dependencies |
 | `../trades.db` | SQLite database (transactions, realized G/L, income trades) |
