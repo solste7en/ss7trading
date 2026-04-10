@@ -2550,6 +2550,125 @@ let _stratOrders = [];
 
 const STRAT_MODES = ['naked', 'vertical', 'collar', 'bundle'];
 
+function _stratLadderEnabled() {
+  const el = document.getElementById('strat-ladder-en');
+  return el && el.checked;
+}
+
+function _stratLadderStepsCount() {
+  const sel = document.getElementById('strat-ladder-steps');
+  const n = sel ? parseInt(sel.value, 10) : 3;
+  return n >= 2 && n <= 7 ? n : 3;
+}
+
+function _stratLadderPriceLabel() {
+  if (stratMode === 'naked') return 'Limit (per share)';
+  return 'Net credit/debit';
+}
+
+function _updateStratSingleVsLadderVisibility() {
+  const en = _stratLadderEnabled();
+  ['sn-single-qp', 'sv-single-qp', 'sc-single-qp'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = en ? 'none' : '';
+  });
+}
+
+function _onStratLadderToggle() {
+  const en = _stratLadderEnabled();
+  const stepsWrap = document.getElementById('strat-ladder-steps-wrap');
+  if (stepsWrap) stepsWrap.style.display = en ? '' : 'none';
+  const rungBox = document.getElementById('strat-ladder-rungs');
+  if (en) {
+    _renderStratLadderRungs();
+    _seedStratLadderRung1FromSingle();
+  } else if (rungBox) {
+    rungBox.style.display = 'none';
+    rungBox.innerHTML = '';
+  }
+  _updateStratSingleVsLadderVisibility();
+  _syncAutoPriceToStratLadderRung1();
+  updateStratPnl();
+}
+
+function _seedStratLadderRung1FromSingle() {
+  const r1 = document.querySelector('#strat-ladder-rungs .strat-rung-row[data-rung="1"]');
+  if (!r1) return;
+  const qIn = r1.querySelector('.strat-rung-qty');
+  const pIn = r1.querySelector('.strat-rung-price');
+  let q = 1, p = '';
+  if (stratMode === 'naked') {
+    q = parseInt(document.getElementById('sn-qty').value, 10) || 1;
+    p = document.getElementById('sn-price').value;
+  } else if (stratMode === 'vertical') {
+    q = parseInt(document.getElementById('sv-qty').value, 10) || 1;
+    p = document.getElementById('sv-price').value;
+  } else if (stratMode === 'collar') {
+    q = parseInt(document.getElementById('sc-qty').value, 10) || 1;
+    p = document.getElementById('sc-price').value;
+  }
+  if (qIn && !qIn.dataset.touched) qIn.value = q;
+  if (pIn && p && !pIn.dataset.touched) pIn.value = p;
+}
+
+function _renderStratLadderRungs() {
+  const container = document.getElementById('strat-ladder-rungs');
+  if (!container) return;
+  if (!_stratLadderEnabled()) {
+    container.style.display = 'none';
+    return;
+  }
+  const n = _stratLadderStepsCount();
+  const priceLbl = _stratLadderPriceLabel();
+  let html = '<div class="strat-ladder-rungs-head"><span>Step</span><span>Contracts</span><span>' + esc(priceLbl) + '</span></div>';
+  for (let i = 1; i <= n; i++) {
+    html +=
+      '<div class="strat-rung-row form-grid" data-rung="' + i + '">' +
+      '<div class="form-group strat-rung-step"><label>#' + i + '</label></div>' +
+      '<div class="form-group">' +
+        '<label class="sr-only">Contracts step ' + i + '</label>' +
+        '<input type="number" class="strat-rung-qty" min="1" step="1" value="1" placeholder="1" ' +
+        'data-rung="' + i + '" oninput="this.dataset.touched=1;updateStratPnl()">' +
+      '</div>' +
+      '<div class="form-group">' +
+        '<label class="sr-only">Price step ' + i + '</label>' +
+        '<input type="number" class="strat-rung-price" step="0.01" min="0" placeholder="0.00" ' +
+        'data-rung="' + i + '" oninput="this.dataset.touched=1;updateStratPnl()">' +
+      '</div>' +
+      '</div>';
+  }
+  container.innerHTML = html;
+  container.style.display = 'block';
+  _syncAutoPriceToStratLadderRung1();
+}
+
+function _collectStratLadderRungs() {
+  const rows = document.querySelectorAll('#strat-ladder-rungs .strat-rung-row');
+  const out = [];
+  rows.forEach(row => {
+    const qEl = row.querySelector('.strat-rung-qty');
+    const pEl = row.querySelector('.strat-rung-price');
+    if (!qEl || !pEl) return;
+    const q = parseInt(qEl.value, 10) || 0;
+    const p = parseFloat(pEl.value);
+    out.push({ qty: q, price: p });
+  });
+  return out;
+}
+
+function _syncAutoPriceToStratLadderRung1() {
+  if (!_stratLadderEnabled()) return;
+  const r1 = document.querySelector('#strat-ladder-rungs .strat-rung-row[data-rung="1"]');
+  if (!r1) return;
+  const priceIn = r1.querySelector('.strat-rung-price');
+  if (!priceIn || priceIn.dataset.touched) return;
+  let src = null;
+  if (stratMode === 'naked') src = document.getElementById('sn-price');
+  else if (stratMode === 'vertical') src = document.getElementById('sv-price');
+  else if (stratMode === 'collar') src = document.getElementById('sc-price');
+  if (src && src.value) priceIn.value = src.value;
+}
+
 function setStrategyMode(mode) {
   stratMode = mode;
   STRAT_MODES.forEach(m => {
@@ -2560,6 +2679,23 @@ function setStrategyMode(mode) {
   });
   document.getElementById('strat-result').innerHTML = '';
   document.getElementById('strat-pnl').style.display = 'none';
+
+  const ladPanel = document.getElementById('strat-ladder-panel');
+  if (ladPanel) ladPanel.style.display = mode === 'bundle' ? 'none' : '';
+
+  if (mode === 'bundle') {
+    const en = document.getElementById('strat-ladder-en');
+    if (en) en.checked = false;
+    const stepsWrap = document.getElementById('strat-ladder-steps-wrap');
+    if (stepsWrap) stepsWrap.style.display = 'none';
+    const rungBox = document.getElementById('strat-ladder-rungs');
+    if (rungBox) { rungBox.innerHTML = ''; rungBox.style.display = 'none'; }
+  } else if (_stratLadderEnabled()) {
+    _renderStratLadderRungs();
+    _seedStratLadderRung1FromSingle();
+  }
+
+  _updateStratSingleVsLadderVisibility();
   _populateStrikeDropdowns();
   updateStratPnl();
 }
@@ -3026,6 +3162,17 @@ async function cancelAllStratOrders() {
 // ── P&L preview ──────────────────────────────────────────────────
 function updateStratPnl() {
   const box = document.getElementById('strat-pnl');
+  if (_stratLadderEnabled() && stratMode !== 'bundle') {
+    const ladderHtml = _stratLadderPnlHtml();
+    if (!ladderHtml) {
+      box.style.display = 'none';
+      return;
+    }
+    box.style.display = '';
+    box.innerHTML = ladderHtml;
+    return;
+  }
+
   let info = null;
 
   try {
@@ -3061,13 +3208,76 @@ function updateStratPnl() {
     '<div class="strat-pnl-grid">' + items + '</div>';
 }
 
+function _stratLadderPnlHtml() {
+  const rungs = _collectStratLadderRungs();
+  if (!rungs.length) return null;
+
+  let rows = '';
+  let sumCredit = 0, sumDebit = 0, nCredit = 0, nDebit = 0;
+  let sumMaxProfitNum = 0, sumMaxLossNum = 0, nMaxProfit = 0, nMaxLoss = 0;
+  let anyUnlimitedLoss = false, anyUnlimitedProfit = false;
+
+  rungs.forEach((r, idx) => {
+    let m = null;
+    try {
+      if (stratMode === 'naked') m = _calcNakedPnlFor(r.qty, r.price);
+      else if (stratMode === 'vertical') m = _calcVerticalPnlFor(r.qty, r.price);
+      else if (stratMode === 'collar') m = _calcCollarPnlFor(r.qty, r.price);
+    } catch (e) { m = null; }
+
+    const step = idx + 1;
+    if (!m) {
+      rows += '<tr class="strat-ladder-pnl-row"><td>#' + step + '</td><td colspan="4" class="strat-ladder-muted">—</td></tr>';
+      return;
+    }
+
+    const nc = m.net_credit;
+    const nd = m.net_debit != null ? m.net_debit : (m.net_cost != null ? m.net_cost : null);
+    if (typeof nc === 'number') { sumCredit += nc; nCredit++; }
+    if (typeof nd === 'number') { sumDebit += nd; nDebit++; }
+
+    const mp = m.max_profit;
+    const ml = m.max_loss;
+    if (typeof mp === 'number') { sumMaxProfitNum += mp; nMaxProfit++; }
+    else if (mp === 'Unlimited') anyUnlimitedProfit = true;
+    if (typeof ml === 'number') { sumMaxLossNum += ml; nMaxLoss++; }
+    else if (ml === 'Unlimited') anyUnlimitedLoss = true;
+
+    const cred = typeof nc === 'number' ? '$' + fmt(nc) : '—';
+    const deb = typeof nd === 'number' ? '$' + fmt(nd) : '—';
+    const mpDisp = typeof mp === 'number' ? '$' + fmt(mp) : esc(String(mp || '—'));
+    const mlDisp = typeof ml === 'number' ? '$' + fmt(ml) : esc(String(ml || '—'));
+
+    rows += '<tr class="strat-ladder-pnl-row"><td>#' + step + '</td><td>' + r.qty + ' @ $' + fmt(r.price) + '</td><td>' + cred + '</td><td>' + deb + '</td><td class="strat-ladder-pnl-mm">' + mpDisp + ' / ' + mlDisp + '</td></tr>';
+  });
+
+  const totCred = nCredit ? '$' + fmt(sumCredit) : '—';
+  const totDeb = nDebit ? '$' + fmt(sumDebit) : '—';
+  const totMp = anyUnlimitedProfit ? '∞' : (nMaxProfit ? '$' + fmt(sumMaxProfitNum) : '—');
+  const totMl = anyUnlimitedLoss ? '∞' : (nMaxLoss ? '$' + fmt(sumMaxLossNum) : '—');
+
+  const foot = '<tr class="strat-ladder-pnl-totals"><td><b>Total</b></td><td></td><td><b>' + totCred + '</b></td><td><b>' + totDeb + '</b></td><td><b>' + totMp + ' / ' + totMl + '</b></td></tr>';
+
+  return (
+    '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;font-weight:600">P&amp;L Preview (ladder)</div>' +
+    '<div class="strat-ladder-pnl-wrap"><table class="strat-ladder-pnl-table">' +
+    '<thead><tr><th>Step</th><th>Qty @ price</th><th>Credit</th><th>Debit</th><th>Max P / Max L</th></tr></thead>' +
+    '<tbody>' + rows + foot + '</tbody></table></div>'
+  );
+}
+
 function _calcNakedPnl() {
+  return _calcNakedPnlFor(
+    parseInt(document.getElementById('sn-qty').value, 10) || 1,
+    parseFloat(document.getElementById('sn-price').value)
+  );
+}
+
+function _calcNakedPnlFor(qty, price) {
   const strike = parseFloat(document.getElementById('sn-strike').value);
-  const price  = parseFloat(document.getElementById('sn-price').value);
-  const qty    = parseInt(document.getElementById('sn-qty').value) || 1;
   const type   = document.getElementById('sn-type').value;
   const action = document.getElementById('sn-action').value;
-  if (!strike || !price) return null;
+  if (!strike || !price || !qty) return null;
 
   const isSell = action.includes('SELL');
   const total  = price * qty * 100;
@@ -3104,16 +3314,22 @@ function _calcNakedPnl() {
 }
 
 function _calcVerticalPnl() {
+  return _calcVerticalPnlFor(
+    parseInt(document.getElementById('sv-qty').value, 10) || 1,
+    parseFloat(document.getElementById('sv-price').value)
+  );
+}
+
+function _calcVerticalPnlFor(qty, netPrice) {
   const sellStrike = parseFloat(document.getElementById('sv-sell-strike').value);
   const buyStrike  = parseFloat(document.getElementById('sv-buy-strike').value);
-  const netPrice   = parseFloat(document.getElementById('sv-price').value);
-  const qty        = parseInt(document.getElementById('sv-qty').value) || 1;
   const orderType  = document.getElementById('sv-order-type').value;
-  if (!sellStrike || !buyStrike || !netPrice) return null;
+  if (!sellStrike || !buyStrike) return null;
+  if (orderType !== 'NET_ZERO' && (netPrice == null || isNaN(netPrice))) return null;
 
   const width   = Math.abs(buyStrike - sellStrike);
   const isCredit = orderType === 'NET_CREDIT';
-  const total    = netPrice * qty * 100;
+  const total    = (netPrice || 0) * qty * 100;
 
   if (isCredit) {
     return {
@@ -3133,14 +3349,19 @@ function _calcVerticalPnl() {
 }
 
 function _calcCollarPnl() {
+  return _calcCollarPnlFor(
+    parseInt(document.getElementById('sc-qty').value, 10) || 1,
+    parseFloat(document.getElementById('sc-price').value) || 0
+  );
+}
+
+function _calcCollarPnlFor(qty, netPrice) {
   const sellStrike = parseFloat(document.getElementById('sc-sell-strike').value);
   const buyStrike  = parseFloat(document.getElementById('sc-buy-strike').value);
-  const netPrice   = parseFloat(document.getElementById('sc-price').value) || 0;
-  const qty        = parseInt(document.getElementById('sc-qty').value) || 1;
   const orderType  = document.getElementById('sc-order-type').value;
   if (!sellStrike || !buyStrike) return null;
 
-  const total = netPrice * qty * 100;
+  const total = (netPrice || 0) * qty * 100;
   const isCredit = orderType === 'NET_CREDIT';
 
   return {
@@ -3154,34 +3375,30 @@ function _calcCollarPnl() {
 function round2(v) { return Math.round(v * 100) / 100; }
 
 // ── Strategy preview & submit ────────────────────────────────────
-function _buildStrategyPayload() {
-  const ticker   = _stratTicker;
-  const expiry   = document.getElementById('strat-expiry').value;
-  const duration = document.getElementById('strat-duration').value;
-  const session  = document.getElementById('strat-session').value;
-
-  if (!ticker)  throw new Error('Ticker is required');
-  if (!expiry)  throw new Error('Expiration is required');
+/** Build one strategy order from per-rung qty/price (naked / vertical / collar only). */
+function _buildStrategyOrderCoreForRung(qty, price) {
+  const ticker = _stratTicker;
+  const expiry = document.getElementById('strat-expiry').value;
+  if (!ticker) throw new Error('Ticker is required');
+  if (!expiry) throw new Error('Expiration is required');
 
   const OP = (type, strike) => {
     const m = expiry.split('-');
-    const sym = ticker.padEnd(6) +
+    return ticker.padEnd(6) +
       m[0].slice(2) + m[1] + m[2] +
       type[0] +
       String(Math.round(strike * 1000)).padStart(8, '0');
-    return sym;
   };
 
-  let legs = [], orderType, price, strategy, summary;
+  let legs, orderType, strategy, summary, priceOut;
 
   if (stratMode === 'naked') {
-    const optType  = document.getElementById('sn-type').value;
-    const action   = document.getElementById('sn-action').value;
-    const strike   = parseFloat(document.getElementById('sn-strike').value);
-    const qty      = parseInt(document.getElementById('sn-qty').value) || 1;
-    price          = parseFloat(document.getElementById('sn-price').value);
+    const optType = document.getElementById('sn-type').value;
+    const action  = document.getElementById('sn-action').value;
+    const strike  = parseFloat(document.getElementById('sn-strike').value);
     if (!strike || strike <= 0) throw new Error('Strike is required');
-    if (!price || price <= 0)   throw new Error('Limit price is required');
+    if (!price || price <= 0) throw new Error('Limit price is required');
+    if (!qty || qty < 1) throw new Error('Contracts must be at least 1');
 
     const chain  = _findChainContract(optType, strike, expiry);
     const symbol = chain ? chain.symbol : OP(optType, strike);
@@ -3189,6 +3406,7 @@ function _buildStrategyPayload() {
     legs = [{ type: 'option', instruction: action, symbol, quantity: qty }];
     orderType = 'LIMIT';
     strategy  = 'naked';
+    priceOut  = price;
 
     const aLabel = { SELL_TO_OPEN: 'Sell to Open', BUY_TO_OPEN: 'Buy to Open',
                      BUY_TO_CLOSE: 'Buy to Close', SELL_TO_CLOSE: 'Sell to Close' }[action];
@@ -3199,11 +3417,10 @@ function _buildStrategyPayload() {
     const optType    = document.getElementById('sv-type').value;
     const sellStrike = parseFloat(document.getElementById('sv-sell-strike').value);
     const buyStrike  = parseFloat(document.getElementById('sv-buy-strike').value);
-    const qty        = parseInt(document.getElementById('sv-qty').value) || 1;
-    price            = parseFloat(document.getElementById('sv-price').value);
     orderType        = document.getElementById('sv-order-type').value;
     if (!sellStrike || !buyStrike) throw new Error('Both strikes are required');
-    if (!price && orderType !== 'NET_ZERO') throw new Error('Price is required');
+    if (!qty || qty < 1) throw new Error('Contracts must be at least 1');
+    if (orderType !== 'NET_ZERO' && (price == null || isNaN(price) || price < 0)) throw new Error('Price is required');
 
     const sellSym = (_findChainContract(optType, sellStrike, expiry) || {}).symbol || OP(optType, sellStrike);
     const buySym  = (_findChainContract(optType, buyStrike, expiry) || {}).symbol || OP(optType, buyStrike);
@@ -3213,18 +3430,19 @@ function _buildStrategyPayload() {
       { type: 'option', instruction: 'BUY_TO_OPEN',  symbol: buySym,  quantity: qty },
     ];
     strategy = 'vertical';
+    priceOut = orderType === 'NET_ZERO' ? undefined : price;
     const badge = optType === 'PUT' ? '<span class="badge badge-PUT">PUT</span>' : '<span class="badge badge-CALL">CALL</span>';
-    summary = `<b>Vertical ${badge} Spread</b> — Sell $${sellStrike} / Buy $${buyStrike} × ${qty}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price || 0}`;
+    summary = `<b>Vertical ${badge} Spread</b> — Sell $${sellStrike} / Buy $${buyStrike} × ${qty}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price != null ? price : 0}`;
 
   } else if (stratMode === 'collar') {
     const sellType   = document.getElementById('sc-sell-type').value;
     const sellStrike = parseFloat(document.getElementById('sc-sell-strike').value);
     const buyType    = document.getElementById('sc-buy-type').value;
     const buyStrike  = parseFloat(document.getElementById('sc-buy-strike').value);
-    const qty        = parseInt(document.getElementById('sc-qty').value) || 1;
-    price            = parseFloat(document.getElementById('sc-price').value) || 0;
     orderType        = document.getElementById('sc-order-type').value;
     if (!sellStrike || !buyStrike) throw new Error('Both strikes are required');
+    if (!qty || qty < 1) throw new Error('Contracts must be at least 1');
+    if (orderType !== 'NET_ZERO' && (price == null || isNaN(price) || price < 0)) throw new Error('Price is required');
 
     const sellSym = (_findChainContract(sellType, sellStrike, expiry) || {}).symbol || OP(sellType, sellStrike);
     const buySym  = (_findChainContract(buyType, buyStrike, expiry) || {}).symbol || OP(buyType, buyStrike);
@@ -3234,39 +3452,137 @@ function _buildStrategyPayload() {
       { type: 'option', instruction: 'BUY_TO_OPEN',  symbol: buySym,  quantity: qty },
     ];
     strategy = 'collar';
-    summary = `<b>Collar</b> — Sell ${sellType} $${sellStrike} + Buy ${buyType} $${buyStrike} × ${qty}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price}`;
+    priceOut = orderType === 'NET_ZERO' ? undefined : (price || 0);
+    summary = `<b>Collar</b> — Sell ${sellType} $${sellStrike} + Buy ${buyType} $${buyStrike} × ${qty}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price != null ? price : 0}`;
 
-  } else if (stratMode === 'bundle') {
+  } else {
+    throw new Error('Unknown strategy mode');
+  }
+
+  return { strategy, legs, order_type: orderType, price: priceOut, _summaryRung: summary };
+}
+
+function _buildStrategyPayload() {
+  const duration = document.getElementById('strat-duration').value;
+  const session  = document.getElementById('strat-session').value;
+
+  if (stratMode === 'bundle') {
+    const ticker   = _stratTicker;
+    const expiry   = document.getElementById('strat-expiry').value;
+    if (!ticker)  throw new Error('Ticker is required');
+    if (!expiry)  throw new Error('Expiration is required');
+
+    const OP = (type, strike) => {
+      const m = expiry.split('-');
+      return ticker.padEnd(6) +
+        m[0].slice(2) + m[1] + m[2] +
+        type[0] +
+        String(Math.round(strike * 1000)).padStart(8, '0');
+    };
+
     const eqAction = document.getElementById('sb-eq-action').value;
-    const eqQty    = parseInt(document.getElementById('sb-eq-qty').value);
+    const eqQty    = parseInt(document.getElementById('sb-eq-qty').value, 10);
     const optType  = document.getElementById('sb-opt-type').value;
     const optAction = document.getElementById('sb-opt-action').value;
     const strike    = parseFloat(document.getElementById('sb-strike').value);
-    const optQty    = parseInt(document.getElementById('sb-opt-qty').value) || 1;
-    price           = parseFloat(document.getElementById('sb-price').value) || 0;
-    orderType       = document.getElementById('sb-order-type').value;
+    const optQty    = parseInt(document.getElementById('sb-opt-qty').value, 10) || 1;
+    const price     = parseFloat(document.getElementById('sb-price').value) || 0;
+    const orderType = document.getElementById('sb-order-type').value;
 
     if (!eqQty || eqQty <= 0)  throw new Error('Equity quantity is required');
     if (!strike || strike <= 0) throw new Error('Strike is required');
 
     const optSym = (_findChainContract(optType, strike, expiry) || {}).symbol || OP(optType, strike);
 
-    legs = [
+    const legs = [
       { type: 'equity', instruction: eqAction, symbol: ticker, quantity: eqQty },
       { type: 'option', instruction: optAction, symbol: optSym, quantity: optQty },
     ];
-    strategy = 'bundle';
+    const strategy = 'bundle';
 
     const eqLabel = { BUY:'Buy', SELL:'Sell', SELL_SHORT:'Sell Short', BUY_TO_COVER:'Buy to Cover' }[eqAction];
     const optLabel = { SELL_TO_OPEN:'STO', BUY_TO_OPEN:'BTO' }[optAction];
-    summary = `<b>Bundle</b> — ${eqLabel} ${eqQty} shares + ${optLabel} ${optQty} ${optType} $${strike}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price}`;
+    const summary = `<b>Bundle</b> — ${eqLabel} ${eqQty} shares + ${optLabel} ${optQty} ${optType} $${strike}<br>${expiry} · ${orderType.replace(/_/g,' ')} $${price}`;
 
+    return {
+      strategy, legs, order_type: orderType,
+      price: orderType === 'NET_ZERO' ? undefined : price,
+      duration, session, _summary: summary,
+    };
+  }
+
+  if (_stratLadderEnabled()) {
+    const rungs = _collectStratLadderRungs();
+    const expect = _stratLadderStepsCount();
+    if (rungs.length !== expect) {
+      throw new Error('Ladder has ' + rungs.length + ' steps but ' + expect + ' were selected — toggle ladder to refresh');
+    }
+    for (let i = 0; i < rungs.length; i++) {
+      const r = rungs[i];
+      if (!r.qty || r.qty < 1) throw new Error('Step ' + (i + 1) + ': enter contracts (min 1)');
+      if (stratMode === 'naked') {
+        if (!r.price || r.price <= 0) throw new Error('Step ' + (i + 1) + ': limit price required');
+      } else {
+        const ot = stratMode === 'vertical'
+          ? document.getElementById('sv-order-type').value
+          : document.getElementById('sc-order-type').value;
+        if (ot !== 'NET_ZERO' && (r.price == null || isNaN(r.price) || r.price < 0)) {
+          throw new Error('Step ' + (i + 1) + ': net price required');
+        }
+      }
+    }
+
+    const orders = rungs.map(r => {
+      const core = _buildStrategyOrderCoreForRung(r.qty, r.price);
+      return {
+        strategy: core.strategy,
+        legs: core.legs,
+        order_type: core.order_type,
+        price: core.price,
+        duration,
+        session,
+        _rung_qty: r.qty,
+        _rung_price: r.price,
+        _summaryRung: core._summaryRung,
+      };
+    });
+
+    const rows = orders.map((o, i) =>
+      '<tr><td>' + (i + 1) + '</td><td>' + esc(String(o._rung_qty)) + '</td><td>$' + fmt(o._rung_price) + '</td><td class="strat-ladder-prev-detail">' + o._summaryRung + '</td></tr>'
+    ).join('');
+
+    const summary =
+      '<div class="strat-ladder-preview-table-wrap">' +
+      '<table class="strat-ladder-preview-table"><thead><tr><th>Step</th><th>Contracts</th><th>Price</th><th>Detail</th></tr></thead><tbody>' +
+      rows + '</tbody></table></div>';
+
+    return { _ladder: true, orders, _summary: summary };
+  }
+
+  let qty, price;
+  if (stratMode === 'naked') {
+    qty = parseInt(document.getElementById('sn-qty').value, 10) || 1;
+    price = parseFloat(document.getElementById('sn-price').value);
+  } else if (stratMode === 'vertical') {
+    qty = parseInt(document.getElementById('sv-qty').value, 10) || 1;
+    price = parseFloat(document.getElementById('sv-price').value);
+  } else if (stratMode === 'collar') {
+    qty = parseInt(document.getElementById('sc-qty').value, 10) || 1;
+    price = parseFloat(document.getElementById('sc-price').value) || 0;
   } else {
     throw new Error('Unknown strategy mode');
   }
 
-  return { strategy, legs, order_type: orderType, price: orderType === 'NET_ZERO' ? undefined : price,
-           duration, session, _summary: summary };
+  const core = _buildStrategyOrderCoreForRung(qty, price);
+  return {
+    strategy: core.strategy,
+    legs: core.legs,
+    order_type: core.order_type,
+    price: core.price,
+    duration,
+    session,
+    _summary: core._summaryRung,
+  };
 }
 
 function _findChainContract(type, strike, expiry) {
@@ -3383,6 +3699,7 @@ function _autoCalcStratPrice() {
     }
   }
 
+  _syncAutoPriceToStratLadderRung1();
   updateStratPnl();
 }
 
@@ -3394,10 +3711,14 @@ function previewStrategy() {
 
     const durLabel = document.getElementById('strat-duration').value === 'gtc' ? 'GTC' : 'Day';
     const sesLabel = {normal:'Normal', seamless:'Extended Hrs'}[document.getElementById('strat-session').value] || 'Normal';
+    const isLad = !!payload._ladder;
+    const title = isLad
+      ? ('Review Strategy Ladder (' + payload.orders.length + ' rungs)')
+      : 'Review Strategy Order';
 
     resultDiv.innerHTML =
       '<div class="preview-box">' +
-        '<div class="preview-title">Review Strategy Order</div>' +
+        '<div class="preview-title">' + esc(title) + '</div>' +
         '<div class="preview-summary">' + payload._summary + '<br>' + durLabel + ' · ' + sesLabel + '</div>' +
         '<div style="font-size:11px;color:#64748b;margin-bottom:14px">Verify all details before confirming.</div>' +
         '<div class="preview-actions">' +
@@ -3415,6 +3736,53 @@ async function submitStrategy() {
   const payload = _stratPendingOrder;
   _stratPendingOrder = null;
   const div = document.getElementById('strat-result');
+
+  if (payload._ladder) {
+    const n = payload.orders.length;
+    div.innerHTML = '<div class="loading">Submitting ' + n + ' strategy orders…</div>';
+    try {
+      const res = await fetch('/api/order/strategy-ladder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: payload.orders }),
+      }).then(r => r.json());
+
+      if (res.error) throw new Error(res.error);
+
+      const rows = res.results.map(r => {
+        const icon = r.status === 'ok'
+          ? '<span class="rung-status rung-ok"></span>'
+          : '<span class="rung-status rung-fail"></span>';
+        const resultCell = r.status === 'ok'
+          ? `${icon}Order #${esc(r.order_id)}`
+          : `<span style="display:inline-flex;align-items:flex-start;gap:6px">${icon}<span class="neg ladder-result-msg">${esc(r.error)}</span></span>`;
+        return `<tr>
+          <td>${r.rung}</td>
+          <td>${fmt(r.qty, 0)}</td>
+          <td>$${fmt(r.price)}</td>
+          <td class="ladder-result-cell">${resultCell}</td>
+        </tr>`;
+      }).join('');
+
+      const ok = res.results.filter(r => r.status === 'ok').length;
+      const fail = res.results.length - ok;
+      const statusMsg = fail === 0
+        ? `<div class="success-box">All ${ok} strategy orders submitted.</div>`
+        : `<div class="error">⚠ ${ok} succeeded, ${fail} failed</div>`;
+
+      div.innerHTML = statusMsg +
+        '<table class="ladder-result-table strat-ladder-result-table" style="margin-top:10px">' +
+        '<thead><tr><th>#</th><th>Contracts</th><th>Price</th><th>Result</th></tr></thead>' +
+        '<tbody>' + rows + '</tbody></table>' +
+        '<div style="margin-top:12px;color:#64748b;font-size:12px">Check Open Orders for partial fills.</div>';
+      ordersState.loaded = false;
+      setTimeout(() => loadStrategyOrders(), 1000);
+    } catch (e) {
+      div.innerHTML = '<div class="error" style="margin-top:0">Ladder failed: ' + esc(e.message) + '</div>';
+    }
+    return;
+  }
+
   div.innerHTML = '<div class="loading">Submitting strategy order…</div>';
   try {
     const body = { ...payload };

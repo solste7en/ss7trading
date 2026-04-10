@@ -890,6 +890,48 @@ def api_place_strategy_order():
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
+@app.route("/api/order/strategy-ladder", methods=["POST"])
+def api_place_strategy_ladder():
+    """Place multiple independent strategy orders (Income tab price ladder)."""
+    try:
+        data = request.json or {}
+        orders = data.get("orders") or []
+
+        if not orders:
+            return jsonify({"error": "No orders provided"}), 400
+        if len(orders) > 7:
+            return jsonify({"error": "Maximum 7 ladder rungs"}), 400
+
+        account_hash = _get_account_hash()
+        client = get_client()
+        results = []
+
+        for i, order_data in enumerate(orders, 1):
+            qty = order_data.get("_rung_qty")
+            price = order_data.get("_rung_price")
+            body = {k: v for k, v in order_data.items() if not str(k).startswith("_")}
+            try:
+                order = _build_multi_leg_order(body)
+                resp = _throttled_order_call(client.place_order, account_hash, order)
+                resp.raise_for_status()
+                location = resp.headers.get("Location", "")
+                order_id = location.rstrip("/").split("/")[-1] if location else "—"
+                results.append({
+                    "rung": i, "qty": qty, "price": price,
+                    "status": "ok", "order_id": order_id,
+                })
+            except Exception as rung_err:
+                results.append({
+                    "rung": i, "qty": qty, "price": price,
+                    "status": "error", "error": str(rung_err),
+                })
+
+        return jsonify({"results": results})
+
+    except Exception as e:
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
 # ── Strategy suggestion engine ──────────────────────────────────────────────────
 
 def _suggest_strategies(positions, quote, chain_data, ticker):

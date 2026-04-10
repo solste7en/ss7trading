@@ -65,7 +65,7 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 | **📊 Income P&L** | Option income strategy performance tracker: clickable KPI cards, paginated trade table with expandable leg detail, filters by ticker/status/strategy/outcome; "Sync from Schwab" rebuilds from API |
 | **Trade** | Place equity/ETF or single-leg option orders; live quote card, TradingView chart, option chain browser (click-to-fill), and current holdings panel |
 | **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); position unwind suggestion engine; current holdings panel + recent trades/open orders sidebar |
-| **💰 Income** | Multi-leg options strategies: naked option, vertical spread, collar, equity+option bundle; suggestion engine with clickable cards; live P&L preview; paginated option chain (20 strikes/page) with strike dropdowns auto-filled from bid/ask |
+| **💰 Income** | Multi-leg options strategies: naked option, vertical spread, collar, equity+option bundle; optional 2–7 rung **price ladder** (per-rung qty/limit or net); suggestion engine with clickable cards; live P&L preview; paginated option chain (20 strikes/page) with strike dropdowns auto-filled from bid/ask |
 | **Open Orders** | All working/queued orders with sortable columns, filters, and cancel buttons |
 
 ---
@@ -107,6 +107,8 @@ The **Income** tab is designed for generating income using options against exist
 3. Browse the inline **option chain** (paginated, 20 strikes/page, centered on ATM) and use **strike dropdowns** — selecting a strike auto-fills the net credit/debit from bid/ask
 4. The **P&L preview panel** updates live as you adjust parameters — shows max profit, max loss, breakeven(s), and net credit/debit
 5. **Preview** → **Confirm** submits via `POST /api/order/strategy`
+
+**Optional price ladder (naked, spread, and collar only):** Check **Enable price ladder** under the ticker / expiration row, choose **Steps** (2–7, default 3), then enter **contracts** and **limit or net price** per rung. The usual single-row quantity and price fields are hidden while the ladder is on so values stay consistent. Auto-priced quotes from the chain fill **rung 1** (and the hidden single-row fields) until you edit that rung. Each rung is submitted as its own multi-leg order via `POST /api/order/strategy-ladder` (same payload shape as a single strategy order, repeated per rung). **Equity + Option (bundle)** mode hides the ladder.
 
 ## 📊 Income P&L tab (income strategy performance tracker)
 
@@ -167,6 +169,7 @@ python3 sync_trades.py --dry-run    # preview without writing
 | `/api/order` | POST | Place equity or single-leg option order |
 | `/api/order/ladder` | POST | Place a ladder of limit orders |
 | `/api/order/strategy` | POST | Place a multi-leg strategy order (spread, collar, bundle) |
+| `/api/order/strategy-ladder` | POST | Place multiple independent strategy orders (`orders` array, max 7); Income tab ladder |
 | `/api/order/<id>` | DELETE | Cancel an order |
 | `/api/option-expirations/<symbol>` | GET | Available option expiration dates for a symbol |
 | `/api/option-chain` | GET | Calls and puts grouped by expiration and strike |

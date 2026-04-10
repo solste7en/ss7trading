@@ -649,6 +649,27 @@
         </div>
       </div>
 
+      <div id="strat-ladder-panel" class="strat-ladder-panel">
+        <div class="strat-ladder-controls">
+          <label class="strat-ladder-check-label">
+            <input type="checkbox" id="strat-ladder-en" onchange="_onStratLadderToggle()">
+            Enable price ladder
+          </label>
+          <div id="strat-ladder-steps-wrap" class="strat-ladder-steps-wrap" style="display:none">
+            <label for="strat-ladder-steps">Steps</label>
+            <select id="strat-ladder-steps" onchange="_renderStratLadderRungs()">
+              <option value="2">2</option>
+              <option value="3" selected>3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+            </select>
+          </div>
+        </div>
+        <div id="strat-ladder-rungs" class="strat-ladder-rungs" style="display:none"></div>
+      </div>
+
       <!-- ── Naked Option form ── -->
       <div id="strat-form-naked" class="strat-form-section">
         <div class="strat-form-title">Naked Option (Single Leg)</div>
@@ -674,6 +695,7 @@
               <option value="">— load chain first —</option>
             </select>
           </div>
+          <div id="sn-single-qp" class="strat-single-qtyprice">
           <div class="form-group">
             <label>Contracts</label>
             <input type="number" id="sn-qty" min="1" step="1" value="1" placeholder="1" oninput="updateStratPnl()">
@@ -681,6 +703,7 @@
           <div class="form-group">
             <label>Limit Price (per share)</label>
             <input type="number" id="sn-price" step="0.01" min="0" placeholder="0.50" oninput="updateStratPnl()">
+          </div>
           </div>
         </div>
       </div>
@@ -707,6 +730,7 @@
               <option value="">— load chain first —</option>
             </select>
           </div>
+          <div id="sv-single-qp" class="strat-single-qtyprice">
           <div class="form-group">
             <label>Contracts (each leg)</label>
             <input type="number" id="sv-qty" min="1" step="1" value="1" placeholder="1" oninput="updateStratPnl()">
@@ -714,6 +738,7 @@
           <div class="form-group">
             <label>Net Credit/Debit</label>
             <input type="number" id="sv-price" step="0.01" min="0" placeholder="0.50" oninput="updateStratPnl()">
+          </div>
           </div>
           <div class="form-group">
             <label>Order Type</label>
@@ -754,6 +779,7 @@
               <option value="">— load chain first —</option>
             </select>
           </div>
+          <div id="sc-single-qp" class="strat-single-qtyprice">
           <div class="form-group">
             <label>Contracts (each leg)</label>
             <input type="number" id="sc-qty" min="1" step="1" value="1" placeholder="1" oninput="updateStratPnl()">
@@ -761,6 +787,7 @@
           <div class="form-group">
             <label>Net Credit/Debit</label>
             <input type="number" id="sc-price" step="0.01" min="0" placeholder="0.00" oninput="updateStratPnl()">
+          </div>
           </div>
           <div class="form-group">
             <label>Order Type</label>
