@@ -2,7 +2,7 @@
 
 A personal trading dashboard and order management tool built on the Schwab API. Tracks positions and trade history, syncs transactions to a local SQLite database, and supports order entry — including ladder orders and multi-leg options strategies — directly from the browser.
 
-**Current version: 0.2.0**
+**Current version: 0.2.1**
 
 ---
 
@@ -60,7 +60,7 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 | **Overview** | Top 10 most-traded tickers with recent equity trades, paginated; custom ticker lookup with options toggle |
 | **Positions** | Live positions with market value, current price, unrealized P&L, and day P&L; sortable columns; ETF badge; options grouped under underlying with expand/collapse; PUT/CALL type and expiry columns |
 | **Quote** | Live quote for any symbol + quotes for held positions or custom watchlists (saved to DB) |
-| **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword |
+| **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword; **Sync from Schwab** with last-sync time and results modal |
 | **Realized G/L** | Closed-position gain/loss, filterable by ticker and short/long term |
 | **📊 Income P&L** | Option income strategy performance tracker: clickable KPI cards, paginated trade table with expandable leg detail, filters by ticker/status/strategy/outcome; "Sync from Schwab" rebuilds from API |
 | **Trade** | Place equity/ETF or single-leg option orders; live quote card, TradingView chart, option chain browser (click-to-fill), and current holdings panel |
@@ -110,11 +110,11 @@ The **Income** tab is designed for generating income using options against exist
 
 ## 📊 Income P&L tab (income strategy performance tracker)
 
-Tracks the full history of option income trades since 2026-01-01, grouped by strategy and linked to their open/close legs.
+Tracks the full history of option income trades from the current calendar year onward (since January 1 of the running year), grouped by strategy and linked to their open/close legs.
 
 **How it works:**
 
-1. Click **Sync from Schwab** to fetch all 2026 option transactions fresh from the Schwab API
+1. Click **Sync from Schwab** to fetch all option transactions for the configured year window fresh from the Schwab API
 2. The sync engine builds a FIFO-matched ledger: each STO/BTO opening leg is paired with its BTC/STC/Expired/Assigned closing leg
 3. Matched legs are grouped into trades by strategy type (naked, spread, collar)
 4. Assignment detection: the Schwab API marks assigned options as "Expired"; the sync cross-references equity TRADE events at the strike price to correctly reclassify them
@@ -180,6 +180,64 @@ python3 sync_trades.py --dry-run    # preview without writing
 | `/api/income/trades` | GET | Paginated income trades (filters: ticker, status, strategy, outcome) |
 | `/api/income/stats` | GET | Aggregate KPI stats for income trades |
 | `/api/test` | GET | Connectivity test |
+| `/api/trades/last-sync` | GET | Last trade sync time and most-traded ticker |
+| `/api/trades/sync` | POST | Run trade sync from Schwab (dynamic lookback; rejects if DB migrations pending) |
+
+---
+
+## Database migrations
+
+If `sync_trades.py` or the app reports that the schema is out of date (for example missing `activity_id` on `transactions`), apply migrations once:
+
+```bash
+source venv/bin/activate
+python3 migrate_db.py
+```
+
+Migrations are recorded in the `schema_migrations` table in `trades.db`.
+
+---
+
+## Testing and benchmarks
+
+Install dev/test dependencies (included in `requirements.txt`):
+
+```bash
+source venv/bin/activate
+pip3 install -r requirements.txt
+```
+
+### Unit tests (pytest)
+
+Run the full suite from the project directory (`schwab_app/`):
+
+```bash
+python3 -m pytest tests/ -v
+```
+
+Quick run without benchmark timing noise:
+
+```bash
+python3 -m pytest tests/ --benchmark-disable -q
+```
+
+Configuration lives in `pytest.ini`. Tests use in-memory SQLite where possible so they do not require your real `trades.db` or live Schwab credentials.
+
+### Performance benchmarks (pytest-benchmark)
+
+Benchmarks measure parsing, deduplication index builds, income matching, and a mocked sync-style pipeline:
+
+```bash
+python3 -m pytest tests/test_benchmarks.py --benchmark-only -v
+```
+
+To run benchmarks together with the rest of the tests (slower):
+
+```bash
+python3 -m pytest tests/ --benchmark-enable -v
+```
+
+Results print as a table (mean time, rounds, iterations) in the terminal.
 
 ---
 
@@ -192,7 +250,11 @@ python3 sync_trades.py --dry-run    # preview without writing
 | `auth.py` | OAuth setup (run once for first-time login) |
 | `config.py` | Loads credentials from `.env` |
 | `sync_trades.py` | Schwab API → `trades.db` sync script |
+| `migrate_db.py` | Versioned SQLite schema migrations for `trades.db` |
 | `income_sync.py` | Income trade sync: FIFO matching, strategy grouping, P&L calculation |
+| `recovery.py` | Assignment recovery tracking (LIFO equity matching) |
+| `pytest.ini` | Pytest configuration |
+| `tests/` | Unit tests and performance benchmarks |
 | `templates/dashboard.html` | Dashboard HTML template |
 | `static/css/style.css` | Dashboard styles |
 | `static/js/dashboard.js` | Dashboard client-side logic |

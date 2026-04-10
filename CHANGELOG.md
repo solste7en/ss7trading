@@ -4,6 +4,41 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [0.2.1] — 2026-04-10
+
+Maintenance and quality release: schema migrations, safer database access, Trade History sync in the UI, expanded automated tests, performance benchmarks, and an Income P&L leg-matching fix for spreads.
+
+### Database and configuration
+
+- **`DB_PATH`** is defined once in `config.py` and imported by `db.py`, `sync_trades.py`, and `migrate_db.py`
+- **`migrate_db.py`** — versioned migrations with a `schema_migrations` table; initial migration adds `activity_id` on `transactions` for Schwab deduplication
+- **`db.py`** — `_connection()` context manager so connections are always closed; public **`get_income_trade_ids_filtered()`** for recovery aggregation without reaching into private helpers
+- **`recovery.py`** — uses the new public DB helper instead of private `_connect` / `_ensure_income_tables` / `_income_trades_where`
+
+### Trade History (dashboard)
+
+- **Sync from Schwab** on the Trade History tab (toolbar), with last-sync display and a results modal (fetched / inserted / skipped / errors, lookback days, most-traded ticker)
+- **`GET /api/trades/last-sync`**, **`POST /api/trades/sync`** — dynamic lookback from last sync + buffer; rejects sync when pending migrations exist
+
+### `sync_trades.py` and `income_sync.py`
+
+- Shared **`_fetch_and_prepare()`** for `sync()` and `dry_run()`; named constants for dedup fuzzy thresholds and assignment tagging; module-level **`TYPE_MAP`**; **`tag_assignments()`** wrapped in try/except so tagging failures do not lose successful inserts
+- **Backfill** — include `trade_date` in the initial query to avoid per-row N+1 selects
+- **`income_sync` — `START_DATE`** uses the current calendar year (January 1) instead of a hard-coded year
+
+### Income P&L: long-leg close display (FIFO)
+
+- **`_match_legs`** — **`Expired`** now closes **long** `Buy to Open` lots as well as short lots (previously only short-side closes matched, so long legs showed as perpetually “open” in the UI)
+- **`Exchange or Exercise`** can close long lots (exercise) as well as short where applicable
+- Dashboard leg row labels: **expired** / **exercised** for human-readable close states
+
+### Testing and benchmarks
+
+- **`pytest`** + **`pytest-benchmark`** in `requirements.txt`; **`pytest.ini`** at repo root
+- **`tests/`** — coverage for `sync_trades`, `app` helpers, `db`, `recovery`, `income_sync`, plus **`tests/test_benchmarks.py`** for hot paths (parse throughput, dedup index build, `_match_recovery`, `suggest_position_unwind`, sync-style pipeline)
+
+---
+
 ## [0.2.0] — 2026-04-04
 
 Major feature release. Introduces the **Income P&L tab** — a full option income strategy performance tracker backed by a new SQLite schema and sync engine. Also enriches the Positions tab with option grouping and expiry display, and upgrades the Income tab with a paginated option chain and dynamic strike dropdowns.
