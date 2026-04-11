@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ss7trading · Dashboard</title>
 <link rel="stylesheet" href="/static/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -62,6 +63,18 @@
           <button type="button" class="wl-cancel-btn" onclick="hideNewPositionListForm()">Cancel</button>
         </div>
         <button type="button" class="pos-new-list-btn" id="pos-new-list-btn" onclick="showNewPositionListForm()">+ New list</button>
+      </div>
+    </div>
+    <div id="pos-chart-wrap" style="display:none">
+      <div class="pos-chart-container">
+        <div class="pos-chart-panel">
+          <h3 class="pos-chart-title">Long Exposure</h3>
+          <canvas id="pos-chart-long"></canvas>
+        </div>
+        <div class="pos-chart-panel">
+          <h3 class="pos-chart-title">Short Exposure</h3>
+          <canvas id="pos-chart-short"></canvas>
+        </div>
       </div>
     </div>
   </div>

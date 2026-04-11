@@ -4,6 +4,7 @@ Provides reusable query functions for the trades.db SQLite database.
 """
 import math
 import sqlite3
+from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -850,6 +851,15 @@ def resolve_position_assignments(underlyings: list, short_equity_symbols: list) 
     }
 
 
+def _net_qty_sign(action: str) -> int:
+    """Return +1 for buy-side actions, -1 for sell-side actions."""
+    if action in ("Buy", "Buy to Cover"):
+        return 1
+    if action in ("Sell", "Sell Short"):
+        return -1
+    return 1
+
+
 def get_recent_equity_trade_metrics_batch(
     symbols: list,
     days: int = 365,
@@ -857,8 +867,8 @@ def get_recent_equity_trade_metrics_batch(
     min_count: int = 10,
 ) -> dict:
     """
-    Per symbol: { "n": int, "avg_price": float } if at least min_count trades in window,
-    else None (caller shows N/A).
+    Per symbol (if at least min_count fills in window):
+      n, avg_price (share-weighted unsigned mean), net_shares (action-derived).
     """
     if not symbols:
         return {}
@@ -869,7 +879,7 @@ def get_recent_equity_trade_metrics_batch(
     mod = f"-{int(days)} days"
     sql = f"""
         WITH ranked AS (
-            SELECT underlying, price,
+            SELECT underlying, action, price, quantity,
                 ROW_NUMBER() OVER (
                     PARTITION BY underlying ORDER BY trade_date DESC, id DESC
                 ) AS rn
@@ -879,24 +889,39 @@ def get_recent_equity_trade_metrics_batch(
               AND trade_date >= date('now', ?)
               AND underlying IN ({placeholders})
         )
-        SELECT underlying, COUNT(*) AS n, AVG(price) AS avg_price
+        SELECT underlying, action, price, quantity
         FROM ranked
         WHERE rn <= ?
-        GROUP BY underlying
     """
     params = [mod] + symbols + [last_n]
+
+    by_sym = defaultdict(list)
     with _connection() as conn:
         cur = conn.cursor()
         cur.execute(sql, params)
-        rows = {r["underlying"]: dict(r) for r in cur.fetchall()}
+        for r in cur.fetchall():
+            by_sym[r["underlying"]].append(dict(r))
 
     out = {}
     for s in symbols:
-        row = rows.get(s)
-        if not row or row["n"] < min_count:
+        rows = by_sym.get(s, [])
+        if len(rows) < min_count:
             out[s] = None
         else:
-            out[s] = {"n": int(row["n"]), "avg_price": float(row["avg_price"])}
+            total_shares = 0.0
+            weighted_sum = 0.0
+            net_shares = 0
+            for x in rows:
+                q = abs(float(x["quantity"]))
+                p = float(x["price"])
+                weighted_sum += q * p
+                total_shares += q
+                net_shares += _net_qty_sign(x["action"]) * int(q)
+            out[s] = {
+                "n": len(rows),
+                "avg_price": weighted_sum / total_shares if total_shares else 0.0,
+                "net_shares": net_shares,
+            }
     return out
 
 

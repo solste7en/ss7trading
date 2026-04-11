@@ -120,13 +120,18 @@ def _clean_positions(accounts_data):
             else:
                 unrealized_pl = pos.get("shortOpenProfitLoss")
 
-            # Current price: per-share for equity/ETF, per-share for options (÷100)
+            # Current price: per-share for equity/ETF (always positive quote), options (÷100)
             current_price = None
             if qty and mkt_value is not None:
                 if asset_type == "OPTION":
                     current_price = mkt_value / (abs(qty) * 100)
                 else:
-                    current_price = mkt_value / abs(qty)
+                    # Shorts carry negative marketValue; show a normal positive last price.
+                    current_price = abs(float(mkt_value)) / abs(qty)
+
+            # Short equity/ETF: show average cost as negative (user convention)
+            if asset_type in ("EQUITY", "ETF") and qty < 0 and avg_price is not None:
+                avg_price = -abs(float(avg_price))
 
             # Parse expiry and strike from OCC symbol for options
             option_expiry, option_strike = (None, None)

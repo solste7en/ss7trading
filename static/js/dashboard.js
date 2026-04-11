@@ -2,6 +2,15 @@ const fmt   = (v,d=2) => v==null ? '—' : Number(v).toLocaleString('en-US',{min
 const fmtD  = (v,d=2) => v==null ? '—' : (v>=0?'+':'') + fmt(v,d);
 const cls   = (v)     => v==null ? '' : (v>=0?'pos':'neg');
 const esc   = (s)     => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const _SELL_ACTIONS = new Set(['Sell', 'Sell Short', 'Sell to Open', 'Sell to Close']);
+const _BUY_ACTIONS  = new Set(['Buy', 'Buy to Cover', 'Buy to Open', 'Buy to Close']);
+function normalizeQty(action, qty) {
+  if (qty == null) return null;
+  const q = Number(qty);
+  if (_SELL_ACTIONS.has(action) && q > 0) return -q;
+  if (_BUY_ACTIONS.has(action) && q < 0) return Math.abs(q);
+  return q;
+}
 
 /** SQLite / ISO-ish datetime for Realized G/L banner */
 function formatRgLastImport(raw) {
@@ -113,7 +122,7 @@ function _overviewTradeRows(trades) {
     return `<tr>
       <td style="color:#64748b;font-size:12px">${r.trade_date}</td>
       <td class="${isBuy ? 'pos' : 'neg'}" style="font-size:12px">${esc(r.action)}</td>
-      <td style="font-size:12px">${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
+      <td style="font-size:12px">${r.quantity != null ? fmt(normalizeQty(r.action, r.quantity), 0) : '—'}</td>
       <td style="font-size:12px">${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
       <td class="${cls(r.amount)}" style="font-size:12px">${r.amount != null ? '$' + fmt(r.amount) : '—'}</td>
     </tr>`;
@@ -463,10 +472,12 @@ function _posVsRecentSortValue(underlying, equityRow) {
   if (!met) return null;
   const cur = equityRow && equityRow.asset_type !== 'OPTION' ? equityRow.current_price : null;
   if (cur == null) return null;
+  const f = met.avg_price;
+  if (f == null || Number.isNaN(f)) return null;
+  const m = Math.abs(cur);
+  const diff = m - f;
   const isShort = equityRow.quantity < 0;
-  const diff = cur - met.avg_price;
-  const pct = met.avg_price ? (diff / met.avg_price) * 100 : 0;
-  return isShort ? -pct : pct;
+  return isShort ? f - m : diff;
 }
 
 function _posSortCompare(a, b) {
@@ -476,6 +487,15 @@ function _posSortCompare(a, b) {
     const mb = _posRecentMetrics[b.symbol];
     let av = ma ? ma.avg_price : null;
     let bv = mb ? mb.avg_price : null;
+    if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
+    if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
+    return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
+  }
+  if (_posSortCol === 'recent_net') {
+    const ma = _posRecentMetrics[a.symbol];
+    const mb = _posRecentMetrics[b.symbol];
+    let av = ma ? ma.net_shares : null;
+    let bv = mb ? mb.net_shares : null;
     if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
     if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
     return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
@@ -544,24 +564,31 @@ function _posBlocksForList(listId) {
 
 function _posRecentMetricCells(underlying, equityRow) {
   const met = _posRecentMetrics[underlying];
+  const na = '<span class="pos-metric-na" title="Need 10+ equity fills in last 365d (equity only)">N/A</span>';
   if (!met) {
-    return {
-      recent: '<span class="pos-metric-na" title="Need 10+ equity fills in last 365d (equity only)">N/A</span>',
-      vs: '—',
-    };
+    return { recent: na, net: '—', vs: '—' };
   }
-  const recentCell = '$' + fmt(met.avg_price, 2);
+  const fillAvg = met.avg_price;
+  const recentCell =
+    fillAvg != null && !Number.isNaN(fillAvg) ? `$${fmt(fillAvg, 2)}` : '—';
+
+  const netShares = met.net_shares;
+  const netCell = netShares != null
+    ? `<span class="${netShares >= 0 ? 'pos' : 'neg'}">${netShares >= 0 ? '+' : ''}${netShares}</span>`
+    : '—';
+
   const cur = equityRow && equityRow.asset_type !== 'OPTION' ? equityRow.current_price : null;
-  if (cur == null) {
-    return { recent: recentCell, vs: '<span class="pos-metric-na">N/A</span>' };
+  if (cur == null || fillAvg == null || Number.isNaN(fillAvg)) {
+    return { recent: recentCell, net: netCell, vs: na };
   }
   const isShort = equityRow.quantity < 0;
-  const diff = cur - met.avg_price;
-  const pct = met.avg_price ? (diff / met.avg_price) * 100 : 0;
+  const m = Math.abs(cur);
+  const diff = m - fillAvg;
+  const pct = fillAvg ? (diff / fillAvg) * 100 : 0;
   const favorable = isShort ? diff < 0 : diff > 0;
   const uClass = favorable ? 'pos' : 'neg';
   const vsStr = `<span class="${uClass}">${fmtD(diff, 2)} (${fmtD(pct, 2)}%)</span>`;
-  return { recent: recentCell, vs: vsStr };
+  return { recent: recentCell, net: netCell, vs: vsStr };
 }
 
 function _renderPositions() {
@@ -597,14 +624,15 @@ function _renderPositions() {
       expiryCell = '';
     }
     const uK = underlyingKey || p.symbol;
-    let recentC;
-    let vsC;
+    let recentC, netC, vsC;
     if (isChild) {
       recentC = '—';
+      netC = '—';
       vsC = '—';
     } else {
       const cells = _posRecentMetricCells(uK, p);
       recentC = cells.recent;
+      netC = cells.net;
       vsC = cells.vs;
     }
     const firstTd = isChild
@@ -623,6 +651,7 @@ function _renderPositions() {
       <td>${p.avg_price != null ? '$' + fmt(p.avg_price, pd) : '—'}</td>
       <td>${p.current_price != null ? '$' + fmt(p.current_price, pd) : '—'}</td>
       <td class="pos-num">${recentC}</td>
+      <td class="pos-num">${netC}</td>
       <td class="pos-num">${vsC}</td>
       <td>${p.market_value != null ? '$' + fmt(p.market_value) : '—'}</td>
       <td class="${cls(p.unrealized_pl)}">${p.unrealized_pl != null ? '$' + fmtD(p.unrealized_pl) : '—'}</td>
@@ -642,7 +671,7 @@ function _renderPositions() {
     const uplStr = totalUpl != null
       ? `<span class="${cls(totalUpl)}">$${fmtD(totalUpl)}</span>` : '—';
     const eqForMet = equityParent || null;
-    const { recent: rc, vs: vc } = _posRecentMetricCells(underlying, eqForMet);
+    const { recent: rc, net: nc, vs: vc } = _posRecentMetricCells(underlying, eqForMet);
     const trClass = 'pos-opt-toggle' + (isOrphan ? ' pos-symbol-reorder-target' : '');
     const firstToggleTd = isOrphan
       ? `<td class="pos-toggle-arrow"><span class="pos-drag-handle" draggable="true" data-underlying="${esc(underlying)}" title="Drag to move to another list">☰</span><span class="pos-opt-expand-btn">${arrow}</span></td>`
@@ -655,6 +684,7 @@ function _renderPositions() {
       </td>
       <td></td><td></td><td></td>
       <td class="pos-num">${rc}</td>
+      <td class="pos-num">${nc}</td>
       <td class="pos-num">${vc}</td>
       <td>${mvStr}</td>
       <td>${uplStr}</td>
@@ -672,6 +702,7 @@ function _renderPositions() {
     <th class="sortable" onclick="sortPositions('avg_price')">Avg Price <span class="sort-arrow" data-pa="avg_price"></span></th>
     <th class="sortable" onclick="sortPositions('current_price')">Mkt Price <span class="sort-arrow" data-pa="current_price"></span></th>
     <th class="sortable" onclick="sortPositions('recent_avg')">10-fill avg <span class="sort-arrow" data-pa="recent_avg"></span></th>
+    <th class="sortable" onclick="sortPositions('recent_net')">10F Net <span class="sort-arrow" data-pa="recent_net"></span></th>
     <th class="sortable" onclick="sortPositions('vs_recent_pct')">vs recent <span class="sort-arrow" data-pa="vs_recent_pct"></span></th>
     <th class="sortable" onclick="sortPositions('market_value')">Mkt Value <span class="sort-arrow" data-pa="market_value"></span></th>
     <th class="sortable" onclick="sortPositions('unrealized_pl')">Unrealized P&amp;L <span class="sort-arrow" data-pa="unrealized_pl"></span></th>
@@ -734,8 +765,8 @@ function _renderPositions() {
   const el = document.getElementById('pos-sections');
   if (el) el.innerHTML = sections.join('');
 
-  const cols = ['symbol', 'quantity', 'avg_price', 'current_price', 'recent_avg', 'vs_recent_pct',
-    'market_value', 'unrealized_pl', 'day_pl', 'day_pl_pct'];
+  const cols = ['symbol', 'quantity', 'avg_price', 'current_price', 'recent_avg', 'recent_net',
+    'vs_recent_pct', 'market_value', 'unrealized_pl', 'day_pl', 'day_pl_pct'];
   document.querySelectorAll('#pos-sections .sort-arrow[data-pa]').forEach(span => {
     const col = span.getAttribute('data-pa');
     span.textContent = col === _posSortCol ? (_posSortDir > 0 ? ' ▲' : ' ▼') : '';
@@ -749,6 +780,111 @@ function sortPositions(col) {
     _posSortDir = 1;
   }
   _renderPositions();
+}
+
+let _posChartLong = null;
+let _posChartShort = null;
+const _PIE_TOP_N = 8;
+const _PIE_COLORS = [
+  '#6366f1','#22d3ee','#f59e0b','#10b981','#ef4444',
+  '#a78bfa','#f472b6','#06b6d4','#84cc16','#fb923c',
+  '#e879f9','#2dd4bf','#fbbf24','#f87171','#34d399',
+];
+
+function _renderPositionCharts() {
+  const wrap = document.getElementById('pos-chart-wrap');
+  if (!wrap || typeof Chart === 'undefined') return;
+  if (!_posData || !_posData.length) { wrap.style.display = 'none'; return; }
+
+  const grouped = {};
+  _posData.forEach(p => {
+    const key = p.asset_type === 'OPTION'
+      ? _posUnderlyingFromOption(p)
+      : p.symbol;
+    if (!grouped[key]) grouped[key] = 0;
+    grouped[key] += (p.market_value || 0);
+  });
+
+  const longItems = [], shortItems = [];
+  for (const [sym, mv] of Object.entries(grouped)) {
+    if (mv > 0) longItems.push({ sym, val: mv });
+    else if (mv < 0) shortItems.push({ sym, val: Math.abs(mv) });
+  }
+  longItems.sort((a, b) => b.val - a.val);
+  shortItems.sort((a, b) => b.val - a.val);
+
+  const bucket = (items) => {
+    if (items.length <= _PIE_TOP_N) return items;
+    const top = items.slice(0, _PIE_TOP_N);
+    const rest = items.slice(_PIE_TOP_N).reduce((s, i) => s + i.val, 0);
+    if (rest > 0) top.push({ sym: 'Others', val: rest });
+    return top;
+  };
+
+  const longBucket = bucket(longItems);
+  const shortBucket = bucket(shortItems);
+
+  const makeConfig = (data) => ({
+    type: 'doughnut',
+    data: {
+      labels: data.map(d => d.sym),
+      datasets: [{
+        data: data.map(d => d.val),
+        backgroundColor: data.map((_, i) => _PIE_COLORS[i % _PIE_COLORS.length]),
+        borderColor: '#1a1d2e',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      cutout: '45%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#94a3b8',
+            font: { size: 11 },
+            padding: 12,
+            usePointStyle: true,
+            pointStyleWidth: 10,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const v = ctx.parsed;
+              const total = ctx.dataset.data.reduce((s, x) => s + x, 0);
+              const pct = total ? ((v / total) * 100).toFixed(1) : '0.0';
+              return ` ${ctx.label}: $${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${pct}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (_posChartLong) _posChartLong.destroy();
+  if (_posChartShort) _posChartShort.destroy();
+
+  const longCanvas = document.getElementById('pos-chart-long');
+  const shortCanvas = document.getElementById('pos-chart-short');
+
+  if (longBucket.length) {
+    _posChartLong = new Chart(longCanvas.getContext('2d'), makeConfig(longBucket));
+    longCanvas.closest('.pos-chart-panel').style.display = '';
+  } else {
+    longCanvas.closest('.pos-chart-panel').style.display = 'none';
+  }
+
+  if (shortBucket.length) {
+    _posChartShort = new Chart(shortCanvas.getContext('2d'), makeConfig(shortBucket));
+    shortCanvas.closest('.pos-chart-panel').style.display = '';
+  } else {
+    shortCanvas.closest('.pos-chart-panel').style.display = 'none';
+  }
+
+  wrap.style.display = (longBucket.length || shortBucket.length) ? 'block' : 'none';
 }
 
 async function loadPositions() {
@@ -780,6 +916,7 @@ async function loadPositions() {
     if (wrap) wrap.style.display = 'block';
     if (toolbar) toolbar.style.display = 'flex';
     _renderPositions();
+    _renderPositionCharts();
   } catch (e) {
     document.getElementById('pos-loading').style.display = 'none';
     document.getElementById('pos-error').style.display = 'block';
@@ -1093,7 +1230,7 @@ async function loadHistory(resetPage=true) {
         <td>${r.option_type?`<span class="badge badge-${r.option_type}">${r.option_type}</span>`:'—'}</td>
         <td>${r.option_strike!=null?'$'+fmt(r.option_strike):'—'}</td>
         <td>${r.option_expiry||'—'}</td>
-        <td>${r.quantity!=null?fmt(r.quantity,0):'—'}</td>
+        <td>${r.quantity!=null?fmt(normalizeQty(r.action, r.quantity),0):'—'}</td>
         <td>${r.price!=null?'$'+fmt(r.price,4):'—'}</td>
         <td>${r.fees!=null?'$'+fmt(r.fees):'—'}</td>
         <td class="${cls(r.amount)}">${r.amount!=null?(r.amount>=0?'+':'')+'$'+fmt(Math.abs(r.amount)):'—'}</td>
@@ -2572,7 +2709,7 @@ async function loadLiveVerify() {
       return `<tr style="${bg}">
         <td style="color:#64748b">${r.trade_date}</td>
         <td class="${isBuy ? 'pos' : 'neg'}">${esc(r.action)}</td>
-        <td>${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
+        <td>${r.quantity != null ? fmt(normalizeQty(r.action, r.quantity), 0) : '—'}</td>
         <td>${r.price != null ? '$' + fmt(r.price, 4) : '—'}${optInfo}</td>
       </tr>`;
     };
@@ -2703,7 +2840,7 @@ async function loadLadderRecent(page) {
       return `<tr>
         <td style="color:#64748b">${r.trade_date}</td>
         <td class="${isBuy ? 'pos' : 'neg'}">${esc(r.action)}</td>
-        <td>${r.quantity != null ? fmt(r.quantity, 0) : '—'}</td>
+        <td>${r.quantity != null ? fmt(normalizeQty(r.action, r.quantity), 0) : '—'}</td>
         <td>${r.price != null ? '$' + fmt(r.price, 4) : '—'}</td>
         <td>${optBadge}</td>
         <td>${r.option_strike != null ? '$' + fmt(r.option_strike) : ''}</td>
@@ -3540,7 +3677,7 @@ async function loadStrategyRecent(page) {
       return '<tr>' +
         '<td style="color:#64748b">' + r.trade_date + '</td>' +
         '<td class="' + (isBuy ? 'pos' : 'neg') + '">' + esc(r.action) + '</td>' +
-        '<td>' + (r.quantity != null ? fmt(r.quantity, 0) : '—') + '</td>' +
+        '<td>' + (r.quantity != null ? fmt(normalizeQty(r.action, r.quantity), 0) : '—') + '</td>' +
         '<td>' + (r.price != null ? '$' + fmt(r.price, 4) : '—') + '</td>' +
         '<td>' + optBadge + '</td>' +
         '<td>' + (r.option_strike != null ? '$' + fmt(r.option_strike) : '') + '</td>' +
