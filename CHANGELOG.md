@@ -4,6 +4,28 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [0.2.2] — 2026-04-11
+
+Positions and dashboard polish: clearer short-side metrics, share-weighted recent fills, exposure charts, and more consistent trade quantity display.
+
+### Positions tab
+
+- **10-fill average** — share-weighted mean of the last 10 equity fills (365-day window); dropped the earlier signed average that did not match execution prices
+- **10F Net** — net share change over those same 10 fills (action-based sign, robust to inconsistent stored quantity signs)
+- **vs recent** — compares absolute market price to the weighted fill anchor, with short- vs long-aware coloring
+- **Short rows** — positive market quote from `abs(marketValue)/abs(qty)`; equity/ETF average price shown negative when quantity is short (Schwab convention)
+- **Bottom charts** — dual doughnut charts (long vs short exposure) with top-N bucketing, “Others” breakdown, summary totals, long/short comparison bar, Chart.js-based tooltips and mini-chart for “Others”
+
+### Trade History and lists
+
+- **Quantity column** — display normalizes sign from **action** (e.g. Sell / Sell Short show negative qty) when the database row has the wrong sign, across the main history table and other trade lists
+
+### Dependencies
+
+- **Chart.js 4** (CDN) for position exposure doughnut charts
+
+---
+
 ## [0.2.1] — 2026-04-10
 
 Maintenance and quality release: schema migrations, safer database access, Trade History sync in the UI, expanded automated tests, performance benchmarks, and an Income P&L leg-matching fix for spreads.

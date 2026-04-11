@@ -2,7 +2,7 @@
 
 A personal trading dashboard and order management tool built on the Schwab API. Tracks positions and trade history, syncs transactions to a local SQLite database, and supports order entry — including ladder orders and multi-leg options strategies — directly from the browser.
 
-**Current version: 0.2.1**
+**Current version: 0.2.2**
 
 ---
 
