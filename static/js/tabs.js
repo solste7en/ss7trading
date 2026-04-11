@@ -11,6 +11,7 @@ export function switchTab(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'overview' && !store.overviewState.loaded) window.loadOverview();
+  if (name === 'balance' && !store.balanceState.loaded) window.loadBalance();
   if (name === 'history' && !store.historyState.loaded) window.loadHistory();
   if (name === 'gains' && !store.gainsState.loaded) window.loadGains();
   if (name === 'orders' && !store.ordersState.loaded) window.loadOrders();
@@ -28,6 +29,7 @@ export function switchTab(name) {
 export function refreshCurrent() {
   document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
   if (store.currentTab === 'overview') window.loadOverview();
+  if (store.currentTab === 'balance') window.loadBalance();
   if (store.currentTab === 'positions') window.loadPositions();
   if (store.currentTab === 'quotes') window.loadQuotes();
   if (store.currentTab === 'history') window.loadHistory();

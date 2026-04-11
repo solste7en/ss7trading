@@ -4,6 +4,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import db as db_module
+from db import get_balance_history, get_balance_snapshot_status, save_balance_snapshot
+from services.accounts import clean_accounts_balance
 from services.orders import clean_orders as _clean_orders
 from services.positions import clean_positions as _clean_positions
 from services.positions import parse_occ as _parse_occ
@@ -183,3 +186,74 @@ class TestCleanOrders:
     def test_empty_orders(self):
         assert _clean_orders([]) == []
         assert _clean_orders(None) == []
+
+
+class TestCleanAccountsBalance:
+    def test_masks_account_and_flattens(self):
+        out = clean_accounts_balance([{
+            "securitiesAccount": {
+                "accountNumber": "12345678",
+                "type": "CASH",
+                "currentBalances": {"cashBalance": 100.5, "nested": {"x": 1}},
+            },
+        }])
+        assert out["accounts"][0]["account_display"] == "****5678"
+        assert out["accounts"][0]["current_balances"] == {"cashBalance": 100.5}
+        assert out["aggregated_balance"] is None
+
+    def test_aggregated_balance(self):
+        out = clean_accounts_balance([{
+            "aggregatedBalance": {"liquidationValue": 1.0},
+            "securitiesAccount": {"accountNumber": "1", "type": "MARGIN"},
+        }])
+        assert out["aggregated_balance"] == {"liquidationValue": 1.0}
+
+
+class TestBalanceSnapshots:
+    _ACCOUNTS = [{
+        "account_display": "****1337",
+        "type": "MARGIN",
+        "round_trips": 0,
+        "is_day_trader": False,
+        "current_balances": {
+            "liquidationValue": 100000.0,
+            "cashBalance": 5000.0,
+            "buyingPower": 200000.0,
+        },
+        "projected_balances": {},
+        "initial_balances": {},
+    }]
+
+    def test_save_and_retrieve(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "snap.db")
+        result = save_balance_snapshot(self._ACCOUNTS, None, as_of_date="2026-04-11")
+        assert result["rows_written"] >= 1
+        assert result["already_saved"] is False
+        assert result["as_of_date"] == "2026-04-11"
+
+        history = get_balance_history()
+        assert len(history) == 1
+        assert history[0]["liquidation_value"] == 100000.0
+        assert history[0]["cash_balance"] == 5000.0
+
+    def test_once_per_day_guard(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "snap2.db")
+        r1 = save_balance_snapshot(self._ACCOUNTS, None, as_of_date="2026-04-11")
+        r2 = save_balance_snapshot(self._ACCOUNTS, None, as_of_date="2026-04-11")
+        assert r1["already_saved"] is False
+        assert r2["already_saved"] is True
+
+    def test_different_days_both_saved(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "snap3.db")
+        save_balance_snapshot(self._ACCOUNTS, None, as_of_date="2026-04-10")
+        save_balance_snapshot(self._ACCOUNTS, None, as_of_date="2026-04-11")
+        history = get_balance_history()
+        dates = [r["as_of_date"] for r in history]
+        assert "2026-04-10" in dates
+        assert "2026-04-11" in dates
+
+    def test_snapshot_status(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "snap4.db")
+        assert get_balance_snapshot_status("2026-04-11") is None
+        save_balance_snapshot(self._ACCOUNTS, None, as_of_date="2026-04-11")
+        assert get_balance_snapshot_status("2026-04-11") is not None

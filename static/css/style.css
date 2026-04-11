@@ -1073,3 +1073,96 @@ tr.pos-dragging td { opacity: 0.55; }
 .pos-pie-mini-wrap canvas {
   display: block; margin: 0 auto; max-width: 100%; height: auto;
 }
+
+/* ── Balance tab ── */
+
+/* Snapshot status bar */
+.bal-snap-bar {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+  font-size: 11px;
+}
+.bal-snap-label { color: var(--color-text-muted); }
+.bal-snap-status { font-weight: 600; border-radius: 4px; padding: 2px 8px; }
+.bal-snap-status--pending { color: var(--color-text-muted); background: transparent; }
+.bal-snap-status--ok      { color: var(--color-pos-bright); background: var(--color-green-muted-bg); }
+.bal-snap-status--cached  { color: var(--color-text-secondary); background: var(--color-surface); }
+.bal-snap-status--err     { color: var(--color-neg); background: var(--color-danger-bg); }
+
+/* Key Metrics KPI strip */
+.bal-kpi-strip {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;
+  margin-bottom: 18px;
+}
+.bal-kpi {
+  position: relative;
+  background: var(--color-surface-2); border: 1px solid var(--color-border-subtle);
+  border-radius: 10px; padding: 12px 14px; text-align: center;
+}
+.bal-kpi-label {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  font-size: 10px; color: var(--color-text-muted); text-transform: uppercase;
+  letter-spacing: .05em; margin-bottom: 4px;
+}
+.bal-kpi-help {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 13px; height: 13px; border-radius: 50%;
+  border: 1px solid var(--color-text-dim); color: var(--color-text-dim);
+  font-size: 9px; font-weight: 700; line-height: 1; cursor: help;
+  flex-shrink: 0; transition: border-color .15s, color .15s;
+}
+.bal-kpi:hover .bal-kpi-help { border-color: var(--color-accent); color: var(--color-accent); }
+.bal-kpi-value { font-size: 18px; font-weight: 700; }
+.bal-kpi-value.pos { color: var(--color-pos-bright); }
+.bal-kpi-value.neg { color: var(--color-neg); }
+
+/* Floating tooltip */
+.bal-tooltip {
+  position: fixed; z-index: 10060; max-width: 280px;
+  padding: 10px 12px; border-radius: 8px;
+  background: #0f1219; border: 1px solid #2d3348;
+  box-shadow: 0 8px 28px rgba(0,0,0,.55);
+  color: var(--color-text-soft); font-size: 12px; line-height: 1.5;
+  pointer-events: none;
+}
+
+/* Account card (full width, no side-by-side grid needed for single account) */
+.bal-card {
+  background: var(--color-surface-2); border: 1px solid var(--color-border-subtle);
+  border-radius: 10px; padding: 16px 18px; margin-bottom: 14px;
+}
+.bal-card-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+.bal-card-meta {
+  font-size: 11px; color: var(--color-text-muted); margin-bottom: 12px;
+}
+.bal-section-label {
+  font-size: 10px; color: var(--color-text-muted); text-transform: uppercase;
+  letter-spacing: .05em; margin-bottom: 6px;
+}
+
+/* Detail rows — multi-column on wider screens */
+.bal-detail-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;
+}
+@media (min-width: 1200px) { .bal-detail-grid { grid-template-columns: 1fr 1fr 1fr; } }
+@media (max-width: 600px)  { .bal-detail-grid { grid-template-columns: 1fr; } }
+
+.bal-detail-row {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 5px 0; border-bottom: 1px solid var(--color-border-subtle); font-size: 12px;
+}
+.bal-detail-row:last-child { border-bottom: none; }
+.bal-detail-label { color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bal-detail-val { font-weight: 600; color: var(--color-text); text-align: right; white-space: nowrap; }
+.bal-empty { color: var(--color-text-muted); font-size: 12px; }
+
+/* Collapsible sections */
+.bal-collapsible {
+  margin-top: 12px; border: 1px solid var(--color-border-subtle); border-radius: 8px;
+  padding: 8px 12px; background: var(--color-surface);
+}
+.bal-collapsible summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: var(--color-text-secondary);
+  list-style: none;
+}
+.bal-collapsible summary::-webkit-details-marker { display: none; }
+.bal-collapsible[open] summary { margin-bottom: 8px; }

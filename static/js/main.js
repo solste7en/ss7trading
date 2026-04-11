@@ -6,6 +6,7 @@ import {
   loadOverview, loadTickerPage, openLadder,
   searchCustomTicker, loadCustomTickerPage,
 } from './overview.js';
+import { loadBalance } from './balance.js';
 import {
   loadPositions, sortPositions, bindPositionsDnD, togglePosGroup,
   movePositionList, showNewPositionListForm, hideNewPositionListForm,
@@ -57,6 +58,7 @@ Object.assign(window, {
   switchTab, refreshCurrent,
   // overview
   loadOverview, loadTickerPage, openLadder, searchCustomTicker, loadCustomTickerPage,
+  loadBalance,
   // positions
   loadPositions, sortPositions, bindPositionsDnD, togglePosGroup,
   movePositionList, showNewPositionListForm, hideNewPositionListForm,

@@ -215,6 +215,78 @@ class TestIncomeBlueprint:
         assert r.status_code == 400
 
 
+_BALANCE_ACCOUNTS_PAYLOAD = [{
+    "securitiesAccount": {
+        "accountNumber": "9999888777",
+        "type": "MARGIN",
+        "roundTrips": 0,
+        "isDayTrader": False,
+        "currentBalances": {
+            "cashBalance": 1000.0,
+            "liquidationValue": 50000.0,
+            "cashAvailableForTrading": 800.0,
+        },
+        "projectedBalances": {"cashBalance": 950.0},
+    },
+}]
+
+
+class TestBalanceBlueprint:
+    @patch("blueprints.balance.get_client")
+    def test_api_account_balances(self, mock_gc, client):
+        mock_gc.return_value.get_accounts.return_value = _ok_resp(_BALANCE_ACCOUNTS_PAYLOAD)
+        r = client.get("/api/account-balances")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert "accounts" in data
+        assert "aggregated_balance" in data
+        assert len(data["accounts"]) == 1
+        acct = data["accounts"][0]
+        assert acct["account_display"] == "****8777"
+        assert acct["type"] == "MARGIN"
+        assert acct["current_balances"]["liquidationValue"] == 50000.0
+        assert acct["projected_balances"]["cashBalance"] == 950.0
+
+    @patch("blueprints.balance.get_client")
+    def test_snapshot_saves_and_returns_date(self, mock_gc, client, tmp_path, monkeypatch):
+        import db as db_module
+        test_db = tmp_path / "test_bal.db"
+        monkeypatch.setattr(db_module, "DB_PATH", test_db)
+        mock_gc.return_value.get_accounts.return_value = _ok_resp(_BALANCE_ACCOUNTS_PAYLOAD)
+        r = client.post("/api/account-balances/snapshot")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert "as_of_date" in data
+        assert data["rows_written"] >= 1
+        assert data["already_saved"] is False
+
+    @patch("blueprints.balance.get_client")
+    def test_snapshot_once_per_day(self, mock_gc, client, tmp_path, monkeypatch):
+        import db as db_module
+        test_db = tmp_path / "test_bal2.db"
+        monkeypatch.setattr(db_module, "DB_PATH", test_db)
+        mock_gc.return_value.get_accounts.return_value = _ok_resp(_BALANCE_ACCOUNTS_PAYLOAD)
+        r1 = client.post("/api/account-balances/snapshot")
+        r2 = client.post("/api/account-balances/snapshot")
+        assert r1.get_json()["already_saved"] is False
+        assert r2.get_json()["already_saved"] is True
+
+    @patch("blueprints.balance.get_balance_snapshot_status", return_value=None)
+    def test_snapshot_status_not_saved(self, _mock, client):
+        r = client.get("/api/account-balances/snapshot/status")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["already_saved"] is False
+        assert data["saved_at"] is None
+
+    def test_balance_history_empty(self, client, tmp_path, monkeypatch):
+        import db as db_module
+        monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "hist.db")
+        r = client.get("/api/account-balances/history")
+        assert r.status_code == 200
+        assert r.get_json()["history"] == []
+
+
 class TestDashboardRoute:
     def test_dashboard_renders(self, client):
         r = client.get("/")

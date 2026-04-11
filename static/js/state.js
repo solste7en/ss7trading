@@ -7,6 +7,7 @@ export const store = {
   currentTab: 'positions',
 
   overviewState: { loaded: false },
+  balanceState: { loaded: false },
   OVERVIEW_LIMIT: 10,
 
   customTickerState: { symbol: '', page: 1, pages: 1, total: 0 },
