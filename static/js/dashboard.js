@@ -1,7 +1,7 @@
 const fmt   = (v,d=2) => v==null ? '—' : Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtD  = (v,d=2) => v==null ? '—' : (v>=0?'+':'') + fmt(v,d);
 const cls   = (v)     => v==null ? '' : (v>=0?'pos':'neg');
-const esc   = (s)     => String(s||'').replace(/</g,'&lt;');
+const esc   = (s)     => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 /** SQLite / ISO-ish datetime for Realized G/L banner */
 function formatRgLastImport(raw) {
