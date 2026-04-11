@@ -6,7 +6,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 
-from config import DB_PATH
+from core.config import DB_PATH
 
 log = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from income_sync import (
+from services.income_sync import (
     _calc_leg_pnl,
     _classify_strategy,
     _determine_status,

@@ -8,7 +8,7 @@ assignments, recovery trades fill the most recent unfilled assignment first.
 """
 import logging
 
-from db import (
+from core.db import (
     get_assigned_trades_for_ticker,
     get_income_trade_ids_filtered,
     get_recovery_equity_trades,

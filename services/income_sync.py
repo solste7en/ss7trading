@@ -10,13 +10,13 @@ import hashlib
 import logging
 from collections import defaultdict
 
-from auth import get_client
-from db import (
+from core.auth import get_client
+from core.db import (
     clear_income_trades,
     set_income_sync_time,
     upsert_income_trade,
 )
-from sync_trades import parse_schwab_transaction
+from services.sync_trades import parse_schwab_transaction
 
 log = logging.getLogger(__name__)
 

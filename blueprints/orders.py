@@ -5,7 +5,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from auth import get_client
+from core.auth import get_client
 from services.orders import build_equity_order, build_multi_leg_order, build_option_order, clean_orders
 from services.schwab_client import get_account_hash, throttled_order_call
 

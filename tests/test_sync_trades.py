@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from sync_trades import (
+from services.sync_trades import (
     build_dedup_structures,
     classify_action,
     clean_money,
@@ -348,7 +348,7 @@ class TestShouldRun:
     def test_force_always_true(self):
         assert should_run(force=True) is True
 
-    @patch("sync_trades.datetime")
+    @patch("services.sync_trades.datetime")
     def test_weekday_in_hours(self, mock_dt):
         from zoneinfo import ZoneInfo
         ET = ZoneInfo("America/New_York")
@@ -356,7 +356,7 @@ class TestShouldRun:
         mock_dt.strptime = datetime.strptime
         assert should_run(force=False) is True
 
-    @patch("sync_trades.datetime")
+    @patch("services.sync_trades.datetime")
     def test_weekday_out_of_hours(self, mock_dt):
         from zoneinfo import ZoneInfo
         ET = ZoneInfo("America/New_York")
@@ -364,7 +364,7 @@ class TestShouldRun:
         mock_dt.strptime = datetime.strptime
         assert should_run(force=False) is False
 
-    @patch("sync_trades.datetime")
+    @patch("services.sync_trades.datetime")
     def test_weekend_no_force(self, mock_dt):
         from zoneinfo import ZoneInfo
         ET = ZoneInfo("America/New_York")

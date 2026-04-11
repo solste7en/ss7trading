@@ -16,7 +16,7 @@ import argparse
 import sqlite3
 import sys
 
-from config import DB_PATH
+from core.config import DB_PATH
 
 # ── Canonical schema (single source of truth) ─────────────────────────────────
 # Used by tests (via import) and documents the expected table shape.

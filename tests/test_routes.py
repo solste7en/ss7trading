@@ -249,7 +249,7 @@ class TestBalanceBlueprint:
 
     @patch("blueprints.balance.get_client")
     def test_snapshot_saves_and_returns_date(self, mock_gc, client, tmp_path, monkeypatch):
-        import db as db_module
+        import core.db as db_module
         test_db = tmp_path / "test_bal.db"
         monkeypatch.setattr(db_module, "DB_PATH", test_db)
         mock_gc.return_value.get_accounts.return_value = _ok_resp(_BALANCE_ACCOUNTS_PAYLOAD)
@@ -262,7 +262,7 @@ class TestBalanceBlueprint:
 
     @patch("blueprints.balance.get_client")
     def test_snapshot_once_per_day(self, mock_gc, client, tmp_path, monkeypatch):
-        import db as db_module
+        import core.db as db_module
         test_db = tmp_path / "test_bal2.db"
         monkeypatch.setattr(db_module, "DB_PATH", test_db)
         mock_gc.return_value.get_accounts.return_value = _ok_resp(_BALANCE_ACCOUNTS_PAYLOAD)
@@ -280,7 +280,7 @@ class TestBalanceBlueprint:
         assert data["saved_at"] is None
 
     def test_balance_history_empty(self, client, tmp_path, monkeypatch):
-        import db as db_module
+        import core.db as db_module
         monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "hist.db")
         r = client.get("/api/account-balances/history")
         assert r.status_code == 200

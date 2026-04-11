@@ -12,7 +12,7 @@ from pathlib import Path
 
 import schwab
 
-from config import APP_KEY, APP_SECRET, CALLBACK_URL, TOKEN_PATH
+from core.config import APP_KEY, APP_SECRET, CALLBACK_URL, TOKEN_PATH
 
 
 def get_client():

@@ -32,15 +32,15 @@ from zoneinfo import ZoneInfo
 
 from authlib.integrations.base_client.errors import OAuthError
 
-from auth import get_client
-from migrate_db import get_pending_migrations
+from core.auth import get_client
+from core.migrate_db import get_pending_migrations
 
 # ── config ────────────────────────────────────────────────────────────────────
 
-BASE_DIR  = Path(__file__).parent
+BASE_DIR  = Path(__file__).resolve().parent.parent  # project root
 LOG_PATH  = BASE_DIR / "sync.log"
 
-from config import DB_PATH
+from core.config import DB_PATH
 
 ET        = ZoneInfo("America/New_York")
 

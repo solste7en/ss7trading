@@ -6,9 +6,9 @@ import threading
 
 from flask import Blueprint, jsonify
 
-from db import get_most_traded_ticker, get_trade_sync_time, set_trade_sync_time
-from migrate_db import get_pending_migrations
-from sync_trades import sync as run_trade_sync
+from core.db import get_most_traded_ticker, get_trade_sync_time, set_trade_sync_time
+from core.migrate_db import get_pending_migrations
+from services.sync_trades import sync as run_trade_sync
 
 log = logging.getLogger(__name__)
 bp = Blueprint("sync", __name__)

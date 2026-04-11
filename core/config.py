@@ -6,13 +6,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# All paths are relative to this file's directory so it works
+# ROOT_DIR is the project root (parent of core/) so paths resolve correctly
 # regardless of where you launch the script from
-BASE_DIR = Path(__file__).parent
-load_dotenv(BASE_DIR / ".env")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT_DIR / ".env")
 
 APP_KEY       = os.environ["SCHWAB_APP_KEY"]
 APP_SECRET    = os.environ["SCHWAB_APP_SECRET"]
 CALLBACK_URL  = os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182/callback")
-TOKEN_PATH    = str(BASE_DIR / os.environ.get("SCHWAB_TOKEN_PATH", "token.json"))
-DB_PATH       = BASE_DIR.parent / "trades.db"
+TOKEN_PATH    = str(ROOT_DIR / os.environ.get("SCHWAB_TOKEN_PATH", "token.json"))
+DB_PATH       = ROOT_DIR / "trades.db"

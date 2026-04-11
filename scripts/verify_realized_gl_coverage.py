@@ -98,7 +98,7 @@ def _interesting_keys(flat_keys: list[str]) -> list[str]:
 
 def scan_api(days: int) -> None:
     sys.path.insert(0, str(BASE_DIR))
-    from auth import get_client  # noqa: E402
+    from core.auth import get_client  # noqa: E402
 
     print(f"\n=== 3. API sample (last {days} days) — key scan ===")
     client = get_client()
@@ -335,7 +335,7 @@ def main() -> int:
         db_path = args.db
     else:
         sys.path.insert(0, str(BASE_DIR))
-        from config import DB_PATH  # noqa: E402
+        from core.config import DB_PATH  # noqa: E402
 
         db_path = DB_PATH
 

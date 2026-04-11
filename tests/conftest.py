@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from migrate_db import TRANSACTIONS_SCHEMA
+from core.migrate_db import TRANSACTIONS_SCHEMA
 
 
 @pytest.fixture

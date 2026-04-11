@@ -5,9 +5,9 @@ import threading
 
 from flask import Blueprint, jsonify, request
 
-from db import dismiss_recovery, get_income_stats, get_income_trades
-from income_sync import run_sync as run_income_sync
-from recovery import attach_recovery_summaries, compute_recovery, sum_recovery_pnl_filtered
+from core.db import dismiss_recovery, get_income_stats, get_income_trades
+from services.income_sync import run_sync as run_income_sync
+from services.recovery import attach_recovery_summaries, compute_recovery, sum_recovery_pnl_filtered
 
 log = logging.getLogger(__name__)
 bp = Blueprint("income", __name__)

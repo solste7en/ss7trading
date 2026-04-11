@@ -8,7 +8,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime
 
-from config import DB_PATH
+from core.config import DB_PATH
 
 
 def _connect():
@@ -1289,7 +1289,7 @@ def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outco
         total = cur.fetchone()[0]
 
         if sb in ("recovery", "recovery_pnl"):
-            from recovery import attach_recovery_summaries
+            from services.recovery import attach_recovery_summaries
             cur.execute(f"SELECT t.* FROM income_trades t {clause} ORDER BY t.id DESC", params)
             trades = [dict(r) for r in cur.fetchall()]
             _income_attach_legs(cur, trades)

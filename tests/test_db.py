@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from db import _income_trades_where
+from core.db import _income_trades_where
 
 # ── _income_trades_where ──────────────────────────────────────────────────────
 
@@ -77,7 +77,7 @@ class TestSuggestPositionUnwind:
     @pytest.fixture
     def populated_db(self, mem_db, monkeypatch):
         """Insert a streak of Buy trades for NVDA and point db to mem_db."""
-        import db as db_mod
+        import core.db as db_mod
         cur = mem_db.cursor()
         for i in range(15):
             cur.execute("""
@@ -95,7 +95,7 @@ class TestSuggestPositionUnwind:
         return mem_db
 
     def test_generates_rungs(self, populated_db):
-        from db import suggest_position_unwind
+        from core.db import suggest_position_unwind
         result = suggest_position_unwind("NVDA", window_size=5, sell_pct=0.25,
                                          min_streak=10, max_rungs=3)
         assert result["direction"] == "Buy"
@@ -109,7 +109,7 @@ class TestSuggestPositionUnwind:
             assert rung["price"] > 0
 
     def test_min_streak_not_met(self, populated_db):
-        from db import suggest_position_unwind
+        from core.db import suggest_position_unwind
         result = suggest_position_unwind("NVDA", min_streak=100)
         assert result["streak_count"] == 15
         assert len(result["rungs"]) == 0
@@ -121,7 +121,7 @@ class TestSuggestPositionUnwind:
 class TestPagination:
     @pytest.fixture
     def tx_db(self, mem_db, monkeypatch):
-        import db as db_mod
+        import core.db as db_mod
         cur = mem_db.cursor()
         for i in range(60):
             cur.execute("""
@@ -139,18 +139,18 @@ class TestPagination:
         return mem_db
 
     def test_page_1_returns_25(self, tx_db):
-        from db import get_transactions
+        from core.db import get_transactions
         result = get_transactions(page=1, limit=25)
         assert len(result["data"]) == 25
         assert result["total"] == 60
         assert result["pages"] == 3
 
     def test_page_3_returns_remaining(self, tx_db):
-        from db import get_transactions
+        from core.db import get_transactions
         result = get_transactions(page=3, limit=25)
         assert len(result["data"]) == 10
 
     def test_category_filter(self, tx_db):
-        from db import get_transactions
+        from core.db import get_transactions
         result = get_transactions(category="option")
         assert result["total"] == 0

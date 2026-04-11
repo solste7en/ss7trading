@@ -2,7 +2,7 @@
 
 import re
 
-from db import get_position_lists
+from core.db import get_position_lists
 
 _ASSET_TYPE_MAP = {
     "COLLECTIVE_INVESTMENT": "ETF",

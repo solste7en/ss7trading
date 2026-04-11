@@ -4,8 +4,8 @@ import logging
 
 from flask import Blueprint, jsonify
 
-from auth import get_client
-from db import get_balance_history, get_balance_snapshot_status, save_balance_snapshot
+from core.auth import get_client
+from core.db import get_balance_history, get_balance_snapshot_status, save_balance_snapshot
 from services.accounts import clean_accounts_balance
 
 log = logging.getLogger(__name__)

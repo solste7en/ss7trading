@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from sync_trades import (
+from services.sync_trades import (
     build_dedup_structures,
     is_duplicate,
     parse_schwab_transaction,
@@ -39,7 +39,7 @@ def _seed_db(conn, n_rows):
     for i in range(n_rows):
         ticker = _TICKERS[i % len(_TICKERS)]
         action = _ACTIONS[i % len(_ACTIONS)]
-        from sync_trades import classify_action
+        from services.sync_trades import classify_action
         cat = classify_action(action)
         price = round(100 + random.random() * 200, 2)
         qty = random.choice([10, 50, 100, -10, -50, -100])
@@ -169,7 +169,7 @@ def test_bench_build_dedup_50k(benchmark, db_50k):
 
 def test_bench_suggest_unwind_200(benchmark, monkeypatch):
     """Ladder generation on a 200-trade history."""
-    import db as db_mod
+    import core.db as db_mod
     random.seed(42)
 
     conn = sqlite3.connect(":memory:")
@@ -190,7 +190,7 @@ def test_bench_suggest_unwind_200(benchmark, monkeypatch):
         yield conn
     monkeypatch.setattr(db_mod, "_connection", _mock_conn)
 
-    from db import suggest_position_unwind
+    from core.db import suggest_position_unwind
     benchmark(suggest_position_unwind, "NVDA", window_size=5, sell_pct=0.25,
               min_streak=10, max_rungs=5)
 
@@ -199,7 +199,7 @@ def test_bench_suggest_unwind_200(benchmark, monkeypatch):
 
 def test_bench_match_recovery(benchmark, monkeypatch):
     """LIFO matching cost: 20 assignments against 500 equity trades."""
-    import recovery as rec_mod
+    import services.recovery as rec_mod
     random.seed(42)
 
     assignments = []

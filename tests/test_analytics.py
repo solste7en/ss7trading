@@ -320,7 +320,7 @@ def _ok_resp(json_data):
 
 class TestAnalyticsRoutes:
     def test_performance_empty(self, client, tmp_path, monkeypatch):
-        import db as db_module
+        import core.db as db_module
         monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test_an.db")
         r = client.get("/api/analytics/performance")
         assert r.status_code == 200
@@ -373,7 +373,7 @@ class TestAnalyticsRoutes:
         assert "holdings" in data
 
     def test_income_summary_ok(self, client, tmp_path, monkeypatch):
-        import db as db_module
+        import core.db as db_module
         monkeypatch.setattr(db_module, "DB_PATH", tmp_path / "test_income.db")
         r = client.get("/api/analytics/income-summary")
         assert r.status_code == 200

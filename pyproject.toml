@@ -14,11 +14,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"sync_trades.py" = ["B007", "E402"]
-"db.py" = ["F841"]
+"services/sync_trades.py" = ["B007", "E402"]
+"core/db.py" = ["F841"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["blueprints", "services"]
+known-first-party = ["blueprints", "core", "services"]
 
 [tool.coverage.run]
 source = ["."]

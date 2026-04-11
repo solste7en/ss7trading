@@ -3,7 +3,7 @@
 import threading
 import time
 
-from auth import get_client
+from core.auth import get_client
 
 _ORDER_INTERVAL_S: float = 0.6
 _order_lock = threading.Lock()

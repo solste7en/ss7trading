@@ -4,7 +4,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from db import (
+from core.db import (
     add_watchlist_symbol,
     create_watchlist,
     delete_watchlist,

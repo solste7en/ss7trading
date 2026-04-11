@@ -5,8 +5,8 @@ import logging
 import schwab
 from flask import Blueprint, jsonify
 
-from auth import get_client
-from db import get_watchlist_symbols
+from core.auth import get_client
+from core.db import get_watchlist_symbols
 from services.positions import clean_positions
 from services.quotes import clean_quotes
 
