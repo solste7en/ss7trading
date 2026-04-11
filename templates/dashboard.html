@@ -66,6 +66,13 @@
       </div>
     </div>
     <div id="pos-chart-wrap" style="display:none">
+      <div id="pos-chart-summary" class="pos-chart-summary">
+        <div class="pos-chart-summary-text" id="pos-chart-summary-text"></div>
+        <div class="pos-chart-summary-bar" id="pos-chart-summary-bar" aria-hidden="true">
+          <div class="pos-chart-bar-long" id="pos-chart-bar-long"></div>
+          <div class="pos-chart-bar-short" id="pos-chart-bar-short"></div>
+        </div>
+      </div>
       <div class="pos-chart-container">
         <div class="pos-chart-panel">
           <h3 class="pos-chart-title">Long Exposure</h3>
@@ -997,6 +1004,12 @@
   </div>
 </div>
 
+<div id="pos-pie-external-tooltip" class="pos-pie-external-tooltip" style="opacity:0" aria-hidden="true">
+  <div id="pos-pie-external-tooltip-inner" class="pos-pie-external-tooltip-inner"></div>
+  <div id="pos-pie-mini-wrap" class="pos-pie-mini-wrap" style="display:none">
+    <canvas id="pos-pie-mini-canvas" width="240" height="240"></canvas>
+  </div>
+</div>
 <script src="/static/js/dashboard.js"></script>
 </body>
 </html>

@@ -784,14 +784,291 @@ function sortPositions(col) {
 
 let _posChartLong = null;
 let _posChartShort = null;
-const _PIE_TOP_N = 8;
+let _posOthersMiniChart = null;
+let _posOthersHideTimer = null;
+let _posOthersPopoverListeners = false;
+
+function _destroyPosOthersMiniChart() {
+  if (_posOthersMiniChart) {
+    _posOthersMiniChart.destroy();
+    _posOthersMiniChart = null;
+  }
+}
+
+function _clearPosOthersHideTimer() {
+  if (_posOthersHideTimer) {
+    clearTimeout(_posOthersHideTimer);
+    _posOthersHideTimer = null;
+  }
+}
+
+function _initPosOthersPopoverHandlers() {
+  if (_posOthersPopoverListeners) return;
+  _posOthersPopoverListeners = true;
+  const host = document.getElementById('pos-pie-external-tooltip');
+  if (!host) return;
+  host.addEventListener('mouseenter', () => {
+    host.dataset.popHover = '1';
+    _clearPosOthersHideTimer();
+  });
+  host.addEventListener('mouseleave', () => {
+    host.dataset.popHover = '0';
+    host.style.opacity = '0';
+    host.classList.remove('pos-pie-external-tooltip--interactive', 'pos-pie-external-tooltip--wide');
+    host.setAttribute('aria-hidden', 'true');
+    _destroyPosOthersMiniChart();
+    const mw = document.getElementById('pos-pie-mini-wrap');
+    if (mw) mw.style.display = 'none';
+  });
+}
+
+const _PIE_LEGEND_COLOR = '#e2e8f0';
+const _PIE_TOP_N_LONG = 8;
+const _PIE_TOP_N_SHORT = 5;
+const _PIE_OTHERS_MINI_LEGEND_TOP = 4;
+const _PIE_MIN_SHORT_ABS = 500;
+const _PIE_MIN_SHORT_PCT = 0.015;
 const _PIE_COLORS = [
   '#6366f1','#22d3ee','#f59e0b','#10b981','#ef4444',
   '#a78bfa','#f472b6','#06b6d4','#84cc16','#fb923c',
   '#e879f9','#2dd4bf','#fbbf24','#f87171','#34d399',
 ];
 
+function _fmtPieUsd(v) {
+  return Number(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function _bucketPieLong(items, topN) {
+  if (items.length <= topN) return { rows: items.slice(), othersDetail: [] };
+  const top = items.slice(0, topN);
+  const rest = items.slice(topN);
+  const restSum = rest.reduce((s, i) => s + i.val, 0);
+  if (restSum > 0) top.push({ sym: 'Others', val: restSum });
+  return { rows: top, othersDetail: rest };
+}
+
+function _bucketPieShort(items, topN, shortBookTotal) {
+  if (!items.length) return { rows: [], othersDetail: [] };
+  const thresh = Math.max(shortBookTotal * _PIE_MIN_SHORT_PCT, _PIE_MIN_SHORT_ABS);
+  const big = [];
+  const small = [];
+  items.forEach(i => (i.val >= thresh ? big : small).push(i));
+  big.sort((a, b) => b.val - a.val);
+  const cap = Math.min(topN, Math.max(1, big.length));
+  const topBig = big.slice(0, cap);
+  const tailBig = big.slice(cap);
+  const mergedTail = [...tailBig, ...small].sort((a, b) => b.val - a.val);
+  const tailSum = mergedTail.reduce((s, i) => s + i.val, 0);
+  const rows = topBig.slice();
+  if (tailSum > 0) rows.push({ sym: 'Others', val: tailSum });
+  return { rows, othersDetail: mergedTail };
+}
+
+function _makePieConfig(rows, meta) {
+  const { bookTotal, othersDetail, sideLabel } = meta;
+  const labels = rows.map(d => d.sym);
+  const values = rows.map(d => d.val);
+  const chartTotal = values.reduce((s, x) => s + Number(x), 0);
+  const border = '#1a1d2e';
+  const book = bookTotal || chartTotal;
+  const sideWord = sideLabel === 'short' ? 'short' : 'long';
+
+  const externalTooltip = context => {
+    const host = document.getElementById('pos-pie-external-tooltip');
+    const inner = document.getElementById('pos-pie-external-tooltip-inner');
+    const miniWrap = document.getElementById('pos-pie-mini-wrap');
+    if (!host || !inner || !miniWrap) return;
+
+    const { chart, tooltip } = context;
+    if (tooltip.opacity === 0) {
+      _clearPosOthersHideTimer();
+      _posOthersHideTimer = setTimeout(() => {
+        _posOthersHideTimer = null;
+        if (host.dataset.popHover === '1') return;
+        host.style.opacity = '0';
+        host.classList.remove('pos-pie-external-tooltip--interactive', 'pos-pie-external-tooltip--wide');
+        host.setAttribute('aria-hidden', 'true');
+        _destroyPosOthersMiniChart();
+        miniWrap.style.display = 'none';
+      }, 120);
+      return;
+    }
+
+    _clearPosOthersHideTimer();
+
+    const tps = tooltip.dataPoints;
+    if (!tps || !tps.length) return;
+    const idx = tps[0].dataIndex;
+    const lab = chart.data.labels[idx];
+    const v = Number(chart.data.datasets[0].data[idx]);
+    const tot = chart.data.datasets[0].data.reduce((s, x) => s + Number(x), 0);
+    const pctChart = tot ? ((v / tot) * 100).toFixed(1) : '0.0';
+
+    const rect = chart.canvas.getBoundingClientRect();
+    let left = rect.left + tooltip.x;
+    let top = rect.top + tooltip.y;
+    const pad = 12;
+    const w = host.offsetWidth || 260;
+    const h = host.offsetHeight || 120;
+    left = Math.max(pad, Math.min(left, window.innerWidth - w - pad));
+    top = Math.max(pad, Math.min(top, window.innerHeight - h - pad));
+    host.style.left = `${left}px`;
+    host.style.top = `${top}px`;
+    host.style.opacity = '1';
+    host.setAttribute('aria-hidden', 'false');
+
+    const isOthers = lab === 'Others' && othersDetail.length > 0;
+    if (isOthers) {
+      host.classList.add('pos-pie-external-tooltip--wide', 'pos-pie-external-tooltip--interactive');
+      const n = othersDetail.length;
+      const sumOthers = othersDetail.reduce((s, d) => s + d.val, 0);
+      const pctBookAll = book ? ((sumOthers / book) * 100).toFixed(1) : '0.0';
+      inner.innerHTML =
+        `<div class="pie-ext-title">${esc(lab)}</div>` +
+        `<div class="pie-ext-sub">${n} names · $${_fmtPieUsd(sumOthers)} total · ${pctChart}% of this chart · ${pctBookAll}% of ${sideWord} book</div>`;
+      miniWrap.style.display = 'block';
+      _destroyPosOthersMiniChart();
+      const miniCanvas = document.getElementById('pos-pie-mini-canvas');
+      if (miniCanvas && typeof Chart !== 'undefined') {
+        const totO = othersDetail.reduce((s, d) => s + d.val, 0);
+        _posOthersMiniChart = new Chart(miniCanvas.getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: othersDetail.map(d => d.sym),
+            datasets: [{
+              data: othersDetail.map(d => d.val),
+              backgroundColor: othersDetail.map((_, i) => _PIE_COLORS[i % _PIE_COLORS.length]),
+              borderColor: border,
+              borderWidth: 1,
+              hoverOffset: 8,
+            }],
+          },
+          options: {
+            animation: false,
+            responsive: true,
+            maintainAspectRatio: true,
+            cutout: '40%',
+            interaction: { mode: 'nearest', intersect: true },
+            plugins: {
+              legend: {
+                display: true,
+                position: 'bottom',
+                labels: {
+                  color: _PIE_LEGEND_COLOR,
+                  font: { size: 9, weight: '500' },
+                  padding: 5,
+                  boxWidth: 10,
+                  usePointStyle: true,
+                  pointStyleWidth: 6,
+                  generateLabels: c => {
+                    const ds = c.data.datasets[0];
+                    const t = ds.data.reduce((s, x) => s + Number(x), 0);
+                    const m0 = c.getDatasetMeta(0);
+                    const nShow = Math.min(_PIE_OTHERS_MINI_LEGEND_TOP, c.data.labels.length);
+                    const out = [];
+                    for (let i = 0; i < nShow; i++) {
+                      const lb = c.data.labels[i];
+                      const val = Number(ds.data[i]);
+                      const pct = t ? ((val / t) * 100).toFixed(1) : '0.0';
+                      const hidden = m0.data[i] ? m0.data[i].hidden === true : false;
+                      out.push({
+                        text: `${lb}  $${_fmtPieUsd(val)} (${pct}%)`,
+                        fillStyle: ds.backgroundColor[i],
+                        strokeStyle: border,
+                        lineWidth: 1,
+                        hidden,
+                        index: i,
+                        fontColor: _PIE_LEGEND_COLOR,
+                        color: _PIE_LEGEND_COLOR,
+                      });
+                    }
+                    return out;
+                  },
+                },
+              },
+              tooltip: {
+                enabled: true,
+                callbacks: {
+                  title: items => (items.length ? items[0].label : ''),
+                  label: c => {
+                    const val = Number(c.dataset.data[c.dataIndex]);
+                    const pO = totO ? ((val / totO) * 100).toFixed(1) : '0.0';
+                    const pB = book ? ((val / book) * 100).toFixed(1) : '0.0';
+                    return ` $${_fmtPieUsd(val)} · ${pO}% of Others · ${pB}% of ${sideWord}`;
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
+    } else {
+      host.classList.remove('pos-pie-external-tooltip--wide', 'pos-pie-external-tooltip--interactive');
+      _destroyPosOthersMiniChart();
+      miniWrap.style.display = 'none';
+      inner.innerHTML =
+        `<div class="pie-ext-title">${esc(lab)}</div>` +
+        `<div>$${_fmtPieUsd(v)} (${pctChart}% of this chart)</div>`;
+    }
+  };
+
+  return {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: labels.map((_, i) => _PIE_COLORS[i % _PIE_COLORS.length]),
+        borderColor: border,
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      cutout: '45%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: _PIE_LEGEND_COLOR,
+            font: { size: 11, weight: '500' },
+            padding: 10,
+            usePointStyle: true,
+            pointStyleWidth: 8,
+            generateLabels: chart => {
+              const ds = chart.data.datasets[0];
+              const tot = ds.data.reduce((s, x) => s + Number(x), 0);
+              const meta0 = chart.getDatasetMeta(0);
+              return chart.data.labels.map((lab, i) => {
+                const val = Number(ds.data[i]);
+                const pct = tot ? ((val / tot) * 100).toFixed(1) : '0.0';
+                const hidden = meta0.data[i] ? meta0.data[i].hidden === true : false;
+                return {
+                  text: `${lab}  $${_fmtPieUsd(val)} (${pct}%)`,
+                  fillStyle: Array.isArray(ds.backgroundColor) ? ds.backgroundColor[i] : ds.backgroundColor,
+                  strokeStyle: border,
+                  lineWidth: 2,
+                  hidden,
+                  index: i,
+                  fontColor: _PIE_LEGEND_COLOR,
+                  color: _PIE_LEGEND_COLOR,
+                };
+              });
+            },
+          },
+        },
+        tooltip: {
+          enabled: true,
+          external: externalTooltip,
+        },
+      },
+    },
+  };
+}
+
 function _renderPositionCharts() {
+  _initPosOthersPopoverHandlers();
   const wrap = document.getElementById('pos-chart-wrap');
   if (!wrap || typeof Chart === 'undefined') return;
   if (!_posData || !_posData.length) { wrap.style.display = 'none'; return; }
@@ -813,78 +1090,72 @@ function _renderPositionCharts() {
   longItems.sort((a, b) => b.val - a.val);
   shortItems.sort((a, b) => b.val - a.val);
 
-  const bucket = (items) => {
-    if (items.length <= _PIE_TOP_N) return items;
-    const top = items.slice(0, _PIE_TOP_N);
-    const rest = items.slice(_PIE_TOP_N).reduce((s, i) => s + i.val, 0);
-    if (rest > 0) top.push({ sym: 'Others', val: rest });
-    return top;
-  };
+  const totalLong = longItems.reduce((s, i) => s + i.val, 0);
+  const totalShort = shortItems.reduce((s, i) => s + i.val, 0);
 
-  const longBucket = bucket(longItems);
-  const shortBucket = bucket(shortItems);
+  const longB = _bucketPieLong(longItems, _PIE_TOP_N_LONG);
+  const shortB = _bucketPieShort(shortItems, _PIE_TOP_N_SHORT, totalShort);
 
-  const makeConfig = (data) => ({
-    type: 'doughnut',
-    data: {
-      labels: data.map(d => d.sym),
-      datasets: [{
-        data: data.map(d => d.val),
-        backgroundColor: data.map((_, i) => _PIE_COLORS[i % _PIE_COLORS.length]),
-        borderColor: '#1a1d2e',
-        borderWidth: 2,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: true,
-      cutout: '45%',
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            color: '#94a3b8',
-            font: { size: 11 },
-            padding: 12,
-            usePointStyle: true,
-            pointStyleWidth: 10,
-          },
-        },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => {
-              const v = ctx.parsed;
-              const total = ctx.dataset.data.reduce((s, x) => s + x, 0);
-              const pct = total ? ((v / total) * 100).toFixed(1) : '0.0';
-              return ` ${ctx.label}: $${v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} (${pct}%)`;
-            },
-          },
-        },
-      },
-    },
-  });
+  const sumText = document.getElementById('pos-chart-summary-text');
+  const barLong = document.getElementById('pos-chart-bar-long');
+  const barShort = document.getElementById('pos-chart-bar-short');
+  const sumBar = document.getElementById('pos-chart-summary-bar');
+  if (sumText && barLong && barShort && sumBar) {
+    const ratio = totalLong > 0 ? ((totalShort / totalLong) * 100).toFixed(1) : (totalShort > 0 ? '—' : '0.0');
+    sumText.textContent =
+      `Long $${_fmtPieUsd(totalLong)} · Short $${_fmtPieUsd(totalShort)} · Short / Long ${ratio}%`;
+    const comb = totalLong + totalShort;
+    if (comb > 0) {
+      const lw = (totalLong / comb) * 100;
+      barLong.style.width = `${lw}%`;
+      barShort.style.width = `${100 - lw}%`;
+      sumBar.style.display = 'flex';
+    } else {
+      barLong.style.width = '50%';
+      barShort.style.width = '50%';
+      sumBar.style.display = 'none';
+    }
+  }
 
+  _clearPosOthersHideTimer();
+  _destroyPosOthersMiniChart();
+  const extTip = document.getElementById('pos-pie-external-tooltip');
+  if (extTip) {
+    extTip.style.opacity = '0';
+    extTip.classList.remove('pos-pie-external-tooltip--interactive', 'pos-pie-external-tooltip--wide');
+    extTip.setAttribute('aria-hidden', 'true');
+  }
+  const extMini = document.getElementById('pos-pie-mini-wrap');
+  if (extMini) extMini.style.display = 'none';
   if (_posChartLong) _posChartLong.destroy();
   if (_posChartShort) _posChartShort.destroy();
 
   const longCanvas = document.getElementById('pos-chart-long');
   const shortCanvas = document.getElementById('pos-chart-short');
 
-  if (longBucket.length) {
-    _posChartLong = new Chart(longCanvas.getContext('2d'), makeConfig(longBucket));
+  if (longB.rows.length) {
+    _posChartLong = new Chart(longCanvas.getContext('2d'), _makePieConfig(longB.rows, {
+      bookTotal: totalLong,
+      othersDetail: longB.othersDetail,
+      sideLabel: 'long',
+    }));
     longCanvas.closest('.pos-chart-panel').style.display = '';
   } else {
     longCanvas.closest('.pos-chart-panel').style.display = 'none';
   }
 
-  if (shortBucket.length) {
-    _posChartShort = new Chart(shortCanvas.getContext('2d'), makeConfig(shortBucket));
+  if (shortB.rows.length) {
+    _posChartShort = new Chart(shortCanvas.getContext('2d'), _makePieConfig(shortB.rows, {
+      bookTotal: totalShort,
+      othersDetail: shortB.othersDetail,
+      sideLabel: 'short',
+    }));
     shortCanvas.closest('.pos-chart-panel').style.display = '';
   } else {
     shortCanvas.closest('.pos-chart-panel').style.display = 'none';
   }
 
-  wrap.style.display = (longBucket.length || shortBucket.length) ? 'block' : 'none';
+  wrap.style.display = (longB.rows.length || shortB.rows.length) ? 'block' : 'none';
 }
 
 async function loadPositions() {
