@@ -37,8 +37,10 @@ env/
 .AppleDouble
 .LSOverride
 
-# ── IDE ────────────────────────────────────────────────────────────
+# ── IDE & AI assistants ────────────────────────────────────────────
 .vscode/
 .idea/
+.cursor/
+.claude/
 *.swp
 *.swo
