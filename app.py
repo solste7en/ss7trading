@@ -4,10 +4,10 @@ Run: python app.py
 Visit: http://127.0.0.1:5050
 """
 import datetime
+import logging
 import re
 import threading
 import time
-import traceback
 from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 import schwab
@@ -58,10 +58,12 @@ def _throttled_order_call(fn, *args, **kwargs):
 BASE_DIR = Path(__file__).parent
 
 app = Flask(__name__)
+log = logging.getLogger(__name__)
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+    log.exception("Unhandled error")
+    return jsonify({"error": str(e)}), 500
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -183,7 +185,8 @@ def api_test():
         resp.raise_for_status()
         return jsonify({"status": "ok", "data": resp.json()})
     except Exception as e:
-        return jsonify({"status": "error", "error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 
 @app.route("/api/positions")
@@ -194,7 +197,8 @@ def api_positions():
         resp.raise_for_status()
         return jsonify(_clean_positions(resp.json()))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/quotes")
@@ -222,7 +226,8 @@ def api_quotes():
         resp.raise_for_status()
         return jsonify(_clean_quotes(resp.json()))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/quote/<symbol>")
@@ -235,7 +240,8 @@ def api_quote_single(symbol):
         data = _clean_quotes(resp.json())
         return jsonify(data[0] if data else {})
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/quotes/list/<int:list_id>")
@@ -250,7 +256,8 @@ def api_quotes_for_list(list_id):
         resp.raise_for_status()
         return jsonify(_clean_quotes(resp.json()))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/watchlists", methods=["GET", "POST"])
@@ -306,7 +313,8 @@ def api_transactions():
         search   = request.args.get("search", "").strip()
         return jsonify(get_transactions(page, limit, category, ticker, search))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/realized_gains")
@@ -318,7 +326,8 @@ def api_realized_gains():
         term   = request.args.get("term", "").strip()
         return jsonify(get_realized_gains(page, limit, ticker, term))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Top Tickers endpoint ──────────────────────────────────────────────────────
@@ -329,7 +338,8 @@ def api_top_tickers():
     try:
         return jsonify(get_top_tickers(top_n=10, recent_n=10))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Live transaction cross-reference endpoint ─────────────────────────────────
@@ -392,7 +402,8 @@ def api_transactions_live():
             "db_rows": db_rows,
         })
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Ladder suggestion endpoint ─────────────────────────────────────────────────
@@ -412,7 +423,8 @@ def api_ladder_suggest():
         return jsonify(suggest_position_unwind(
             ticker, window_size, sell_pct, premium_cents, min_streak, max_rungs))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Option chain endpoints ─────────────────────────────────────────────────────
@@ -432,7 +444,8 @@ def api_option_expirations(symbol):
                 expirations.append(date_str[:10])
         return jsonify({"symbol": symbol.upper(), "expirations": sorted(expirations)})
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 def _clean_option_map(exp_date_map):
@@ -517,7 +530,8 @@ def api_option_chain():
             "puts":        puts,
         })
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Order helpers ──────────────────────────────────────────────────────────────
@@ -782,7 +796,8 @@ def api_orders():
         orders = [o for o in raw if o.get("status", "") in open_statuses]
         return jsonify(_clean_orders(orders))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/order", methods=["POST"])
@@ -809,7 +824,8 @@ def api_place_order():
         return jsonify({"status": "ok", "order_id": order_id})
 
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/order/ladder", methods=["POST"])
@@ -855,7 +871,8 @@ def api_place_ladder():
         return jsonify({"results": results})
 
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/order/<order_id>", methods=["DELETE"])
@@ -868,7 +885,8 @@ def api_cancel_order(order_id):
         resp.raise_for_status()
         return jsonify({"status": "cancelled", "order_id": order_id})
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Strategy order placement ────────────────────────────────────────────────────
@@ -887,7 +905,8 @@ def api_place_strategy_order():
         order_id = location.rstrip("/").split("/")[-1] if location else "—"
         return jsonify({"status": "ok", "order_id": order_id})
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/order/strategy-ladder", methods=["POST"])
@@ -929,7 +948,8 @@ def api_place_strategy_ladder():
         return jsonify({"results": results})
 
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Strategy suggestion engine ──────────────────────────────────────────────────
@@ -1254,7 +1274,8 @@ def api_strategy_suggest():
             "suggestions": suggestions,
         })
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Trade History Sync ─────────────────────────────────────────────────────────
@@ -1271,7 +1292,8 @@ def api_trades_last_sync():
             "most_traded_ticker":  get_most_traded_ticker(),
         })
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/trades/sync", methods=["POST"])
@@ -1317,7 +1339,8 @@ def api_trades_sync():
             **result,
         })
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
     finally:
         _trades_sync_lock.release()
 
@@ -1335,7 +1358,8 @@ def api_income_sync():
         result = run_income_sync()
         return jsonify({"ok": True, **result})
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
     finally:
         _income_sync_lock.release()
 
@@ -1356,7 +1380,8 @@ def api_income_trades():
         attach_recovery_summaries(data["data"])
         return jsonify(data)
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/income/stats")
@@ -1371,7 +1396,8 @@ def api_income_stats():
         stats["total_recovery_pnl"] = sum_recovery_pnl_filtered(ticker, status, strategy, outcome)
         return jsonify(stats)
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Assignment Recovery ─────────────────────────────────────────────────────────
@@ -1385,7 +1411,8 @@ def api_income_recovery():
             return jsonify({"error": "ticker is required"}), 400
         return jsonify(compute_recovery(ticker))
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/income/recovery/<int:trade_id>/dismiss", methods=["POST"])
@@ -1399,7 +1426,8 @@ def api_income_recovery_dismiss(trade_id):
         dismiss_recovery(trade_id, qty)
         return jsonify({"ok": True, "trade_id": trade_id, "dismissed_qty": qty})
     except Exception as e:
-        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Dashboard UI ───────────────────────────────────────────────────────────────
