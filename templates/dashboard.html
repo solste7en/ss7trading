@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ss7trading · Dashboard</title>
 <link rel="stylesheet" href="/static/css/style.css">
+<link rel="stylesheet" href="/static/css/themes.css">
+<script>
+  // Apply saved theme instantly to prevent flash
+  (function(){var t=localStorage.getItem('ss7-theme');if(t)document.documentElement.setAttribute('data-theme',t)})();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -13,6 +18,18 @@
   <div>
     <h1>📈 ss7trading</h1>
     <div class="sub" id="lastUpdated">Loading…</div>
+  </div>
+  <div class="theme-picker" id="theme-picker">
+    <span class="theme-picker-label">Theme</span>
+    <div class="theme-swatch" data-theme="midnight" title="Midnight"  style="background:#6366f1"></div>
+    <div class="theme-swatch" data-theme="ember"    title="Ember"     style="background:#d97706"></div>
+    <div class="theme-swatch" data-theme="ocean"    title="Ocean"     style="background:#06b6d4"></div>
+    <div class="theme-swatch" data-theme="forest"   title="Forest"    style="background:#059669"></div>
+    <div class="theme-swatch" data-theme="rose"     title="Rose"      style="background:#e11d48"></div>
+    <div class="theme-picker-sep"></div>
+    <div class="theme-swatch" data-theme="daylight" title="Daylight"  style="background:linear-gradient(135deg,#e0e7ff,#f8fafc);border-color:#c7d2fe"></div>
+    <div class="theme-swatch" data-theme="sand"     title="Sand"      style="background:linear-gradient(135deg,#fde68a,#faf8f5);border-color:#fbbf24"></div>
+    <div class="theme-swatch" data-theme="cloud"    title="Cloud"     style="background:linear-gradient(135deg,#d1d5db,#f3f4f6);border-color:#9ca3af"></div>
   </div>
   <button class="refresh-btn" onclick="refreshCurrent()">↻ Refresh</button>
 </div>

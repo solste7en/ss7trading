@@ -491,7 +491,11 @@ export function sortPositions(col) {
   _renderPositions();
 }
 
-const _PIE_LEGEND_COLOR = '#e2e8f0';
+/** Read a CSS custom property from :root at call time (theme-aware). */
+function _cssVar(name, fallback) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
 const _PIE_TOP_N_LONG = 8;
 const _PIE_TOP_N_SHORT = 5;
 const _PIE_OTHERS_MINI_LEGEND_TOP = 4;
@@ -572,7 +576,8 @@ export function _makePieConfig(rows, meta) {
   const labels = rows.map(d => d.sym);
   const values = rows.map(d => d.val);
   const chartTotal = values.reduce((s, x) => s + Number(x), 0);
-  const border = '#1a1d2e';
+  const legendColor = _cssVar('--color-text', '#e2e8f0');
+  const border = _cssVar('--color-surface', '#1a1d2e');
   const book = bookTotal || chartTotal;
   const sideWord = sideLabel === 'short' ? 'short' : 'long';
 
@@ -657,7 +662,7 @@ export function _makePieConfig(rows, meta) {
                 display: true,
                 position: 'bottom',
                 labels: {
-                  color: _PIE_LEGEND_COLOR,
+                  color: legendColor,
                   font: { size: 9, weight: '500' },
                   padding: 5,
                   boxWidth: 10,
@@ -681,8 +686,8 @@ export function _makePieConfig(rows, meta) {
                         lineWidth: 1,
                         hidden,
                         index: i,
-                        fontColor: _PIE_LEGEND_COLOR,
-                        color: _PIE_LEGEND_COLOR,
+                        fontColor: legendColor,
+                        color: legendColor,
                       });
                     }
                     return out;
@@ -734,7 +739,7 @@ export function _makePieConfig(rows, meta) {
         legend: {
           position: 'bottom',
           labels: {
-            color: _PIE_LEGEND_COLOR,
+            color: legendColor,
             font: { size: 11, weight: '500' },
             padding: 10,
             usePointStyle: true,
@@ -754,8 +759,8 @@ export function _makePieConfig(rows, meta) {
                   lineWidth: 2,
                   hidden,
                   index: i,
-                  fontColor: _PIE_LEGEND_COLOR,
-                  color: _PIE_LEGEND_COLOR,
+                  fontColor: legendColor,
+                  color: legendColor,
                 };
               });
             },

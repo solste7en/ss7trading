@@ -822,7 +822,11 @@ function _initPosOthersPopoverHandlers() {
   });
 }
 
-const _PIE_LEGEND_COLOR = '#e2e8f0';
+/** Read a CSS custom property from :root at call time (theme-aware). */
+function _cssVar(name, fallback) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
 const _PIE_TOP_N_LONG = 8;
 const _PIE_TOP_N_SHORT = 5;
 const _PIE_OTHERS_MINI_LEGEND_TOP = 4;
@@ -869,7 +873,8 @@ function _makePieConfig(rows, meta) {
   const labels = rows.map(d => d.sym);
   const values = rows.map(d => d.val);
   const chartTotal = values.reduce((s, x) => s + Number(x), 0);
-  const border = '#1a1d2e';
+  const legendColor = _cssVar('--color-text', '#e2e8f0');
+  const border = _cssVar('--color-surface', '#1a1d2e');
   const book = bookTotal || chartTotal;
   const sideWord = sideLabel === 'short' ? 'short' : 'long';
 
@@ -954,7 +959,7 @@ function _makePieConfig(rows, meta) {
                 display: true,
                 position: 'bottom',
                 labels: {
-                  color: _PIE_LEGEND_COLOR,
+                  color: legendColor,
                   font: { size: 9, weight: '500' },
                   padding: 5,
                   boxWidth: 10,
@@ -978,8 +983,8 @@ function _makePieConfig(rows, meta) {
                         lineWidth: 1,
                         hidden,
                         index: i,
-                        fontColor: _PIE_LEGEND_COLOR,
-                        color: _PIE_LEGEND_COLOR,
+                        fontColor: legendColor,
+                        color: legendColor,
                       });
                     }
                     return out;
@@ -1031,7 +1036,7 @@ function _makePieConfig(rows, meta) {
         legend: {
           position: 'bottom',
           labels: {
-            color: _PIE_LEGEND_COLOR,
+            color: legendColor,
             font: { size: 11, weight: '500' },
             padding: 10,
             usePointStyle: true,
@@ -1051,8 +1056,8 @@ function _makePieConfig(rows, meta) {
                   lineWidth: 2,
                   hidden,
                   index: i,
-                  fontColor: _PIE_LEGEND_COLOR,
-                  color: _PIE_LEGEND_COLOR,
+                  fontColor: legendColor,
+                  color: legendColor,
                 };
               });
             },
@@ -2346,12 +2351,15 @@ function loadTradingViewChart(ticker) {
   a.href = 'https://www.tradingview.com/symbols/' + symSlug + '/';
   a.rel = 'noopener nofollow';
   a.target = '_blank';
-  a.style.color = '#64748b';
+  a.style.color = _cssVar('--color-text-muted', '#64748b');
   a.style.textDecoration = 'none';
   a.textContent = ticker.toUpperCase() + ' chart by TradingView';
   copyright.appendChild(a);
   container.appendChild(copyright);
 
+  const isLight = ['daylight', 'sand', 'cloud'].includes(
+    document.documentElement.getAttribute('data-theme') || ''
+  );
   const script = document.createElement('script');
   script.type = 'text/javascript';
   script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
@@ -2361,11 +2369,11 @@ function loadTradingViewChart(ticker) {
     symbol: sym,
     interval: 'D',
     timezone: 'America/New_York',
-    theme: 'dark',
+    theme: isLight ? 'light' : 'dark',
     style: '1',
     locale: 'en',
-    backgroundColor: '#131621',
-    gridColor: '#1e2235',
+    backgroundColor: _cssVar('--color-surface-2', '#131621'),
+    gridColor: _cssVar('--color-border-subtle', '#1e2235'),
     allow_symbol_change: true,
     calendar: false,
     hide_top_toolbar: false,

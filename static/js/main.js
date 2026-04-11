@@ -11,6 +11,7 @@ import {
   loadPositions, sortPositions, bindPositionsDnD, togglePosGroup,
   movePositionList, showNewPositionListForm, hideNewPositionListForm,
   createPositionList, beginPositionListRename, deletePositionList,
+  _renderPositionCharts,
 } from './positions.js';
 import {
   initWatchlists, selectWatchlist, showNewListForm, hideNewListForm,
@@ -103,6 +104,32 @@ Object.assign(window, {
 window._paginationRegistry = store._paginationRegistry;
 window.ladderRungs = store.ladderRungs;
 window.customTickerState = store.customTickerState;
+
+// Theme picker
+(function initThemePicker() {
+  const STORAGE_KEY = 'ss7-theme';
+  const VALID = new Set(['midnight','ember','ocean','forest','rose','daylight','sand','cloud']);
+  const picker = document.getElementById('theme-picker');
+  if (!picker) return;
+  const swatches = picker.querySelectorAll('.theme-swatch');
+  let current = localStorage.getItem(STORAGE_KEY) || 'midnight';
+  if (!VALID.has(current)) current = 'midnight';
+
+  function apply(name, rerender = false) {
+    if (name === 'midnight') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', name);
+    }
+    localStorage.setItem(STORAGE_KEY, name);
+    swatches.forEach(s => s.classList.toggle('active', s.dataset.theme === name));
+    // Re-render position charts so legend/border colors update immediately
+    if (rerender) _renderPositionCharts();
+  }
+
+  swatches.forEach(s => s.addEventListener('click', () => apply(s.dataset.theme, true)));
+  apply(current);
+})();
 
 // Bootstrap
 document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
