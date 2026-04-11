@@ -153,12 +153,8 @@ async function loadOverview() {
         + ` / ${(t.option_count||0).toLocaleString()} option)</span>`;
 
       const rows = _overviewTradeRows(t.recent_trades);
-      const hasNext = (t.equity_count || 0) > OVERVIEW_LIMIT;
-      const pag = `<div id="tpag-${t.symbol}" style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:4px">
-        <button class="pg-btn" disabled>‹ Prev</button>
-        <span class="pg-info">Page 1 · ${(t.equity_count||0).toLocaleString()} trades</span>
-        <button class="pg-btn" ${hasNext ? '' : 'disabled'} onclick="loadTickerPage('${t.symbol}',2)">Next ›</button>
-      </div>`;
+      const totalPages = Math.ceil((t.equity_count||0) / OVERVIEW_LIMIT);
+      const pag = `<div id="tpag-${t.symbol}">${_overviewPag(1, totalPages, t.equity_count||0, p => `loadTickerPage('${t.symbol}',${p})`)}</div>`;
 
       return `<div class="ticker-card" id="tcard-${t.symbol}">
         <div class="ticker-card-header">
@@ -214,7 +210,7 @@ async function loadTickerPage(symbol, page) {
     tableDiv.innerHTML =
       '<table><thead><tr><th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>'
       + '<tbody>' + _overviewTradeRows(res.data) + '</tbody></table>';
-    if (pagDiv) pagDiv.outerHTML = _overviewPag(res.page, res.pages, res.total, p => `loadTickerPage('${symbol}',${p})`);
+    if (pagDiv) pagDiv.innerHTML = _overviewPag(res.page, res.pages, res.total, p => `loadTickerPage('${symbol}',${p})`);
   } catch(e) {
     tableDiv.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
   }

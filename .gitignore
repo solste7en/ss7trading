@@ -32,6 +32,12 @@ venv/
 .venv/
 env/
 
+# ── Test coverage ───────────────────────────────────────────────────
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # ── macOS ──────────────────────────────────────────────────────────
 .DS_Store
 .AppleDouble
