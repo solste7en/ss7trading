@@ -1,15 +1,15 @@
 """Tests for income_sync.py — strategy classification, status, P&L, and dedup keys."""
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from income_sync import (
+    _calc_leg_pnl,
     _classify_strategy,
     _determine_status,
     _get_close_date,
     _make_dedup_key,
-    _calc_leg_pnl,
     _match_legs,
 )
 

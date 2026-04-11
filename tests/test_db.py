@@ -1,7 +1,7 @@
 """Tests for db.py — filter builders, pagination, and position-unwind logic."""
-import sys
 import os
 import sqlite3
+import sys
 from contextlib import contextmanager
 
 import pytest
@@ -9,7 +9,6 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from db import _income_trades_where
-
 
 # ── _income_trades_where ──────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 """Tests for sync_trades.py — parsing, dedup, and market-hours logic."""
-import sys
 import os
+import sys
 from collections import defaultdict
 from datetime import datetime
 from unittest.mock import patch
@@ -10,26 +10,24 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sync_trades import (
-    clean_money,
-    parse_option_symbol,
-    classify_action,
-    extract_fees,
-    dedup_key,
-    is_duplicate,
     build_dedup_structures,
+    classify_action,
+    clean_money,
+    dedup_key,
+    extract_fees,
+    is_duplicate,
+    parse_option_symbol,
     parse_schwab_transaction,
-    should_run,
     record_in_dedup,
-    SELL_ALIASES,
+    should_run,
 )
 from tests.conftest import (
+    _make_raw_dividend,
+    _make_raw_journal,
+    _make_raw_sma,
     _make_raw_trade_equity,
     _make_raw_trade_option,
-    _make_raw_dividend,
-    _make_raw_sma,
-    _make_raw_journal,
 )
-
 
 # ── clean_money ───────────────────────────────────────────────────────────────
 

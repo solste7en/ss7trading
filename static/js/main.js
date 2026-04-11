@@ -1,0 +1,110 @@
+import { debounce } from './utils.js';
+import * as S from './state.js';
+
+import { switchTab, refreshCurrent } from './tabs.js';
+import {
+  loadOverview, loadTickerPage, openLadder,
+  searchCustomTicker, loadCustomTickerPage,
+} from './overview.js';
+import {
+  loadPositions, sortPositions, bindPositionsDnD, togglePosGroup,
+  movePositionList, showNewPositionListForm, hideNewPositionListForm,
+  createPositionList, beginPositionListRename, deletePositionList,
+} from './positions.js';
+import {
+  initWatchlists, selectWatchlist, showNewListForm, hideNewListForm,
+  createWatchlist, deleteCurrentList, addWatchlistSymbol,
+  removeWatchlistSymbol, loadQuotes, fetchQuote,
+} from './quotes.js';
+import {
+  loadHistory, closeSyncModal, syncTrades, loadGains, renderPagination,
+} from './history.js';
+import {
+  loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
+  toggleIncomeTrade, dismissRecovery, syncIncome, _ipOnStatusChange,
+} from './income.js';
+import {
+  setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
+  previewOrder, submitPendingOrder, clearTradeResult, showTradeError,
+  loadTradeQuote, loadTradingViewChart, loadOptionExpirations,
+  loadOptionChain, onChainClick, loadPositionSummaryForTicker,
+  clearPositionPanel, syncTradeTicker,
+} from './trade.js';
+import {
+  renderRungs, addRung, removeRung, updateLadderSummary,
+  ladderEvenSplit, ladderScaleUp, ladderScaleDown,
+  onLadderTickerChange, loadLadderSuggest, applyLadderSuggest,
+  loadLadderRecent, loadLiveVerify, loadLadderOrders,
+  cancelLadderOrder, cancelAllLadderOrders, previewLadder, submitLadder,
+} from './ladder.js';
+import {
+  loadOrders, sortOrders, filterOrders, cancelOrder,
+} from './orders.js';
+import {
+  setStrategyMode, onStrategyTickerChange, loadStrategyExpirations,
+  loadStrategyChain, shiftChainPage, onStratChainClick,
+  loadStrategySuggestions, applyStrategySuggestion,
+  loadStrategyRecent, loadStrategyOrders,
+  cancelStratOrder, cancelAllStratOrders,
+  updateStratPnl, previewStrategy, submitStrategy,
+  _onStratLadderToggle, _renderStratLadderRungs,
+  _populateStrikeDropdowns, _autoCalcStratPrice,
+} from './strategy.js';
+
+// Expose all functions that HTML inline handlers need on window
+Object.assign(window, {
+  // tabs
+  switchTab, refreshCurrent,
+  // overview
+  loadOverview, loadTickerPage, openLadder, searchCustomTicker, loadCustomTickerPage,
+  // positions
+  loadPositions, sortPositions, bindPositionsDnD, togglePosGroup,
+  movePositionList, showNewPositionListForm, hideNewPositionListForm,
+  createPositionList, beginPositionListRename, deletePositionList,
+  // quotes
+  initWatchlists, selectWatchlist, showNewListForm, hideNewListForm,
+  createWatchlist, deleteCurrentList, addWatchlistSymbol,
+  removeWatchlistSymbol, loadQuotes, fetchQuote,
+  // history
+  loadHistory, closeSyncModal, syncTrades, loadGains, renderPagination,
+  // income
+  loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
+  toggleIncomeTrade, dismissRecovery, syncIncome, _ipOnStatusChange,
+  // trade
+  setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
+  previewOrder, submitPendingOrder, clearTradeResult, showTradeError,
+  loadTradeQuote, loadTradingViewChart, loadOptionExpirations,
+  loadOptionChain, onChainClick, loadPositionSummaryForTicker,
+  clearPositionPanel, syncTradeTicker,
+  // ladder
+  renderRungs, addRung, removeRung, updateLadderSummary,
+  ladderEvenSplit, ladderScaleUp, ladderScaleDown,
+  onLadderTickerChange, loadLadderSuggest, applyLadderSuggest,
+  loadLadderRecent, loadLiveVerify, loadLadderOrders,
+  cancelLadderOrder, cancelAllLadderOrders, previewLadder, submitLadder,
+  // orders
+  loadOrders, sortOrders, filterOrders, cancelOrder,
+  // strategy
+  setStrategyMode, onStrategyTickerChange, loadStrategyExpirations,
+  loadStrategyChain, shiftChainPage, onStratChainClick,
+  loadStrategySuggestions, applyStrategySuggestion,
+  loadStrategyRecent, loadStrategyOrders,
+  cancelStratOrder, cancelAllStratOrders,
+  updateStratPnl, previewStrategy, submitStrategy,
+  _onStratLadderToggle, _renderStratLadderRungs,
+  _populateStrikeDropdowns, _autoCalcStratPrice,
+  // utils needed by inline handlers
+  debounce,
+});
+
+// Expose shared state that inline handlers reference
+window._paginationRegistry = S._paginationRegistry;
+window.ladderRungs = S.ladderRungs;
+window.customTickerState = S.customTickerState;
+
+// Bootstrap
+document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+loadPositions();
+loadOverview();
+initWatchlists();
+renderRungs();

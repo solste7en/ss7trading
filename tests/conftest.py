@@ -1,36 +1,9 @@
 """Shared fixtures for the schwab_app test suite."""
 import sqlite3
+
 import pytest
 
-
-TRANSACTIONS_SCHEMA = """
-CREATE TABLE transactions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    trade_date    TEXT,
-    action        TEXT,
-    category      TEXT,
-    symbol        TEXT,
-    underlying    TEXT,
-    description   TEXT,
-    quantity      REAL,
-    price         REAL,
-    fees          REAL,
-    amount        REAL,
-    is_option     INTEGER DEFAULT 0,
-    option_type   TEXT,
-    option_strike REAL,
-    option_expiry TEXT,
-    imported_at   TEXT DEFAULT (datetime('now')),
-    is_from_option_event INTEGER DEFAULT 0,
-    linked_option_id      INTEGER,
-    linked_option_action  TEXT,
-    activity_id   INTEGER
-);
-CREATE INDEX idx_tx_date       ON transactions(trade_date);
-CREATE INDEX idx_tx_underlying ON transactions(underlying);
-CREATE INDEX idx_tx_category   ON transactions(category);
-CREATE INDEX idx_tx_activity_id ON transactions(activity_id);
-"""
+from migrate_db import TRANSACTIONS_SCHEMA
 
 
 @pytest.fixture

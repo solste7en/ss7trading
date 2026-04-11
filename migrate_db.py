@@ -15,9 +15,40 @@ Import API (used by sync_trades.py):
 import argparse
 import sqlite3
 import sys
-from pathlib import Path
 
 from config import DB_PATH
+
+# ── Canonical schema (single source of truth) ─────────────────────────────────
+# Used by tests (via import) and documents the expected table shape.
+
+TRANSACTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS transactions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_date    TEXT,
+    action        TEXT,
+    category      TEXT,
+    symbol        TEXT,
+    underlying    TEXT,
+    description   TEXT,
+    quantity      REAL,
+    price         REAL,
+    fees          REAL,
+    amount        REAL,
+    is_option     INTEGER DEFAULT 0,
+    option_type   TEXT,
+    option_strike REAL,
+    option_expiry TEXT,
+    imported_at   TEXT DEFAULT (datetime('now')),
+    is_from_option_event INTEGER DEFAULT 0,
+    linked_option_id      INTEGER,
+    linked_option_action  TEXT,
+    activity_id   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_tx_date        ON transactions(trade_date);
+CREATE INDEX IF NOT EXISTS idx_tx_underlying  ON transactions(underlying);
+CREATE INDEX IF NOT EXISTS idx_tx_category    ON transactions(category);
+CREATE INDEX IF NOT EXISTS idx_tx_activity_id ON transactions(activity_id);
+"""
 
 # ── migration registry ────────────────────────────────────────────────────────
 # Each entry: (version_str, description, list_of_sql_statements)

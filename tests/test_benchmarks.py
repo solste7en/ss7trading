@@ -2,12 +2,10 @@
 
 Run with:  pytest tests/test_benchmarks.py --benchmark-only -v
 """
-import math
+import os
 import random
 import sqlite3
 import sys
-import os
-from collections import defaultdict
 from contextlib import contextmanager
 
 import pytest
@@ -15,20 +13,18 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from sync_trades import (
-    parse_schwab_transaction,
-    is_duplicate,
     build_dedup_structures,
-    dedup_key,
+    is_duplicate,
+    parse_schwab_transaction,
     record_in_dedup,
 )
 from tests.conftest import (
-    _make_raw_trade_equity,
-    _make_raw_trade_option,
+    TRANSACTIONS_SCHEMA,
     _make_raw_dividend,
     _make_raw_journal,
-    TRANSACTIONS_SCHEMA,
+    _make_raw_trade_equity,
+    _make_raw_trade_option,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

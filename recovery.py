@@ -7,10 +7,11 @@ CALL assignments (forced sell) recover via Buy.  When a ticker has multiple
 assignments, recovery trades fill the most recent unfilled assignment first.
 """
 import logging
+
 from db import (
     get_assigned_trades_for_ticker,
-    get_recovery_equity_trades,
     get_income_trade_ids_filtered,
+    get_recovery_equity_trades,
 )
 
 log = logging.getLogger(__name__)

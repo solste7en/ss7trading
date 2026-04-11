@@ -3,6 +3,7 @@ config.py — loads Schwab API credentials from .env
 """
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 # All paths are relative to this file's directory so it works

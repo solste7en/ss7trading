@@ -22,7 +22,7 @@ import json
 import re
 import sqlite3
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -106,7 +106,7 @@ def scan_api(days: int) -> None:
     resp.raise_for_status()
     acct_hash = resp.json()[0]["hashValue"]
 
-    end_dt = datetime.now(timezone.utc)
+    end_dt = datetime.now(UTC)
     start_dt = end_dt - timedelta(days=days)
     resp = client.get_transactions(
         account_hash=acct_hash,

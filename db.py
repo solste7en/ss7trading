@@ -288,8 +288,8 @@ def suggest_position_unwind(ticker, window_size=5, sell_pct=0.25,
             "exit_trades": [],
             "params": _pack_params(window_size, sell_pct, premium_cents,
                                    min_streak, max_rungs),
-            "note": (f"All recent trades are exits"
-                     f" — no accumulation to unwind"),
+            "note": ("All recent trades are exits"
+                     " — no accumulation to unwind"),
         }
 
     unwind_action = _ACCUM_UNWIND[direction]

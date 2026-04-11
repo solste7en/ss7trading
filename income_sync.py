@@ -11,13 +11,12 @@ import logging
 from collections import defaultdict
 
 from auth import get_client
-from sync_trades import parse_schwab_transaction
-
 from db import (
     clear_income_trades,
-    upsert_income_trade,
     set_income_sync_time,
+    upsert_income_trade,
 )
+from sync_trades import parse_schwab_transaction
 
 log = logging.getLogger(__name__)
 
@@ -34,8 +33,8 @@ def run_sync():
     resp.raise_for_status()
     acct_hash = resp.json()[0]["hashValue"]
 
-    end_dt = datetime.datetime.now(datetime.timezone.utc)
-    start_dt = datetime.datetime(START_DATE.year, 1, 1, tzinfo=datetime.timezone.utc)
+    end_dt = datetime.datetime.now(datetime.UTC)
+    start_dt = datetime.datetime(START_DATE.year, 1, 1, tzinfo=datetime.UTC)
 
     resp = client.get_transactions(
         account_hash=acct_hash,
@@ -445,7 +444,7 @@ def _fill_assignment_prices(client, trades):
             try:
                 dt = datetime.date.fromisoformat(date_str)
                 start = datetime.datetime(dt.year, dt.month, dt.day,
-                                          tzinfo=datetime.timezone.utc)
+                                          tzinfo=datetime.UTC)
                 end = start + datetime.timedelta(days=3)
                 resp = client.get_price_history_every_day(
                     ticker, start_datetime=start, end_datetime=end)

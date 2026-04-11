@@ -1,11 +1,13 @@
-"""Tests for pure helper functions in app.py."""
-import sys
+"""Tests for pure helper functions (now in services/)."""
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app import _parse_occ, _clean_positions, _clean_quotes, _clean_orders
-
+from services.orders import clean_orders as _clean_orders
+from services.positions import clean_positions as _clean_positions
+from services.positions import parse_occ as _parse_occ
+from services.quotes import clean_quotes as _clean_quotes
 
 # ── _parse_occ ────────────────────────────────────────────────────────────────
 

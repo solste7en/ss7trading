@@ -20,20 +20,20 @@ Usage:
   python3 sync_trades.py --backfill # enrich existing DB rows that have empty descriptions
 """
 
-import sys
+import argparse
+import logging
 import re
 import sqlite3
-import logging
-import argparse
+import sys
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from auth import get_client
 from authlib.integrations.base_client.errors import OAuthError
+
+from auth import get_client
 from migrate_db import get_pending_migrations
-import schwab
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +41,7 @@ BASE_DIR  = Path(__file__).parent
 LOG_PATH  = BASE_DIR / "sync.log"
 
 from config import DB_PATH
+
 ET        = ZoneInfo("America/New_York")
 
 MARKET_OPEN  = 9    # 9:00 AM ET  (market opens 9:30, but 9 AM gives a small buffer)
@@ -356,9 +357,7 @@ def parse_schwab_transaction(tx: dict) -> dict | None:
             action = "Margin Interest"
         elif "foreign tax" in sub:
             action = "Foreign Tax Paid"
-        elif is_qualified:
-            action = "Qualified Dividend"
-        elif "qualified" in sub:
+        elif is_qualified or "qualified" in sub:
             action = "Qualified Dividend"
         elif "special" in sub:
             action = "Special Qual Div"
@@ -645,7 +644,7 @@ def _fetch_and_prepare(lookback_days: int):
     acct_hash = accounts[0]["hashValue"]
     log.info("Account: ...%s", accounts[0].get("accountNumber", "")[-4:])
 
-    end_dt   = datetime.now(timezone.utc)
+    end_dt   = datetime.now(UTC)
     start_dt = end_dt - timedelta(days=lookback_days)
 
     resp = client.get_transactions(
@@ -803,7 +802,7 @@ def backfill_descriptions():
     resp.raise_for_status()
     acct_hash = resp.json()[0]["hashValue"]
 
-    end_dt   = datetime.now(timezone.utc)
+    end_dt   = datetime.now(UTC)
     start_dt = end_dt - timedelta(days=365)
 
     resp = client.get_transactions(
