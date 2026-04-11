@@ -51,21 +51,19 @@
 <div class="panel active" id="tab-positions">
   <div class="loading" id="pos-loading">Loading positions…</div>
   <div id="pos-error" class="error" style="display:none"></div>
-  <div class="table-wrap" id="pos-table" style="display:none">
-    <table id="pos-tbl"><thead><tr>
-      <th style="width:28px"></th>
-      <th class="sortable" onclick="sortPositions('symbol')">Symbol / Strike <span class="sort-arrow" id="pa-symbol"></span></th>
-      <th>Type</th>
-      <th>P/C</th>
-      <th>Expiry</th>
-      <th class="sortable" onclick="sortPositions('quantity')">Qty <span class="sort-arrow" id="pa-quantity"></span></th>
-      <th class="sortable" onclick="sortPositions('avg_price')">Avg Price <span class="sort-arrow" id="pa-avg_price"></span></th>
-      <th class="sortable" onclick="sortPositions('current_price')">Mkt Price <span class="sort-arrow" id="pa-current_price"></span></th>
-      <th class="sortable" onclick="sortPositions('market_value')">Mkt Value <span class="sort-arrow" id="pa-market_value"></span></th>
-      <th class="sortable" onclick="sortPositions('unrealized_pl')">Unrealized P&amp;L <span class="sort-arrow" id="pa-unrealized_pl"></span></th>
-      <th class="sortable" onclick="sortPositions('day_pl')">Day P&amp;L <span class="sort-arrow" id="pa-day_pl"></span></th>
-      <th class="sortable" onclick="sortPositions('day_pl_pct')">Day % <span class="sort-arrow" id="pa-day_pl_pct"></span></th>
-    </tr></thead><tbody id="pos-tbody"></tbody></table>
+  <div id="pos-table-wrap" style="display:none">
+    <div id="pos-sections"></div>
+    <div class="pos-toolbar" id="pos-toolbar" style="display:none">
+      <div class="pos-toolbar-inner">
+        <div id="pos-new-form" style="display:none" class="pos-new-form">
+          <input type="text" id="pos-new-name-input" placeholder="List name…" maxlength="60"
+                 onkeydown="if(event.key==='Enter') createPositionList(); if(event.key==='Escape') hideNewPositionListForm()">
+          <button type="button" class="wl-confirm-btn" onclick="createPositionList()">Create</button>
+          <button type="button" class="wl-cancel-btn" onclick="hideNewPositionListForm()">Cancel</button>
+        </div>
+        <button type="button" class="pos-new-list-btn" id="pos-new-list-btn" onclick="showNewPositionListForm()">+ New list</button>
+      </div>
+    </div>
   </div>
 </div>
 

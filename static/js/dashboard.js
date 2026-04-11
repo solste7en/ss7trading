@@ -269,11 +269,162 @@ async function loadCustomTickerPage(page) {
   }
 }
 
-// ── Positions (grouped, sortable table) ──────────────────────────
-let _posData       = [];
-let _posSortCol    = null;
-let _posSortDir    = 1;
-let _posExpanded   = new Set(); // set of underlying symbols whose options are expanded
+// ── Positions (lists, drag-and-drop, recent-trade context) ───────
+const POSITION_LIST_OTHER_ID = 4;
+
+let _posData = [];
+let _posLists = [];
+let _posAssignments = {};
+let _posRecentMetrics = {};
+let _posSortCol = null;
+let _posSortDir = 1;
+let _posExpanded = new Set();
+let _posDndBound = false;
+let _posVolume365 = {};
+let _posDndPayload = null;
+
+function _posUnderlyingFromOption(p) {
+  return String(p.underlying_symbol || p.symbol.split(/\s+/)[0] || '').toUpperCase();
+}
+
+function _collectPositionTabKeys(data) {
+  const nonOpt = data.filter(p => p.asset_type !== 'OPTION');
+  const opts = data.filter(p => p.asset_type === 'OPTION');
+  const underlyings = new Set();
+  const shortEq = [];
+  nonOpt.forEach(p => {
+    underlyings.add(String(p.symbol).toUpperCase());
+    if (p.quantity < 0 && p.asset_type !== 'CASH_EQUIVALENT') {
+      shortEq.push(String(p.symbol).toUpperCase());
+    }
+  });
+  opts.forEach(p => underlyings.add(_posUnderlyingFromOption(p)));
+  return { underlyings: [...underlyings], short_equity: shortEq };
+}
+
+function bindPositionsDnD() {
+  if (_posDndBound) return;
+  _posDndBound = true;
+  const root = document.getElementById('pos-sections');
+  if (!root) return;
+
+  root.addEventListener('click', e => {
+    const tr = e.target.closest('tr.pos-opt-toggle');
+    if (!tr || tr.dataset.expandUnderlying == null) return;
+    if (e.target.closest('.pos-drag-handle')) return;
+    if (e.target.closest('button')) return;
+    togglePosGroup(tr.dataset.expandUnderlying);
+  });
+
+  root.addEventListener('dragstart', e => {
+    _posDndPayload = null;
+    const h = e.target.closest('.pos-drag-handle');
+    if (!h || h.dataset.underlying == null) return;
+    const tr = h.closest('tr');
+    const srcList = tr && tr.dataset.listId != null ? parseInt(tr.dataset.listId, 10) : NaN;
+    _posDndPayload = {
+      type: 'symbol',
+      underlying: String(h.dataset.underlying).toUpperCase(),
+      sourceListId: srcList,
+    };
+    e.dataTransfer.setData('application/json', JSON.stringify(_posDndPayload));
+    e.dataTransfer.effectAllowed = 'move';
+    if (tr) tr.classList.add('pos-dragging');
+  });
+
+  root.addEventListener('dragend', () => {
+    document.querySelectorAll('.pos-dragging').forEach(el => el.classList.remove('pos-dragging'));
+    document.querySelectorAll('.pos-list-dropzone.drag-over, tr.pos-symbol-reorder-target.drag-over').forEach(el => {
+      el.classList.remove('drag-over');
+    });
+    _posDndPayload = null;
+  });
+
+  root.addEventListener('dragover', e => {
+    const p = _posDndPayload;
+    if (!p || p.type !== 'symbol') return;
+    const row = e.target.closest('tr.pos-symbol-reorder-target');
+    const zone = e.target.closest('.pos-list-dropzone');
+    if (row || zone) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    }
+  });
+
+  root.addEventListener('dragenter', e => {
+    const p = _posDndPayload;
+    if (!p || p.type !== 'symbol') return;
+    const row = e.target.closest('tr.pos-symbol-reorder-target');
+    if (row) row.classList.add('drag-over');
+    else {
+      const zone = e.target.closest('.pos-list-dropzone');
+      if (zone) zone.classList.add('drag-over');
+    }
+  });
+
+  root.addEventListener('dragleave', e => {
+    const row = e.target.closest('tr.pos-symbol-reorder-target');
+    if (row && !row.contains(e.relatedTarget)) row.classList.remove('drag-over');
+    const sum = e.target.closest('.pos-list-summary');
+    if (sum && !sum.contains(e.relatedTarget)) sum.classList.remove('drag-over');
+    const zone = e.target.closest('.pos-list-table-wrap');
+    if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove('drag-over');
+  });
+
+  root.addEventListener('drop', async e => {
+    const raw = e.dataTransfer.getData('application/json');
+    let payload = _posDndPayload;
+    try {
+      if (raw) payload = JSON.parse(raw);
+    } catch (_) {}
+    if (!payload || payload.type !== 'symbol') return;
+
+    const u = String(payload.underlying || '').toUpperCase();
+    const srcList = parseInt(payload.sourceListId, 10);
+    if (!u || !Number.isFinite(srcList)) return;
+
+    const row = e.target.closest('tr.pos-symbol-reorder-target');
+    if (row) {
+      const targetList = parseInt(row.dataset.listId, 10);
+      const targetBlock = row.dataset.posBlock;
+      if (Number.isFinite(targetList) && targetBlock && targetList !== srcList) {
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        try {
+          const res = await fetchJson('/api/position-assignments', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [u]: targetList }),
+          });
+          _posAssignments[u] = targetList;
+          _renderPositions();
+        } catch (err) {
+          alert(err.message || String(err));
+        }
+        return;
+      }
+    }
+
+    const z = e.target.closest('.pos-list-dropzone');
+    if (!z) return;
+    e.preventDefault();
+    z.classList.remove('drag-over');
+    const lid = parseInt(z.dataset.listId, 10);
+    if (!Number.isFinite(lid)) return;
+    if (lid === srcList) return;
+    try {
+      const res = await fetchJson('/api/position-assignments', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [u]: lid }),
+      });
+      _posAssignments[u] = lid;
+      _renderPositions();
+    } catch (err) {
+      alert(err.message || String(err));
+    }
+  });
+}
 
 function togglePosGroup(underlying) {
   if (_posExpanded.has(underlying)) _posExpanded.delete(underlying);
@@ -281,67 +432,162 @@ function togglePosGroup(underlying) {
   _renderPositions();
 }
 
-function _renderPositions() {
-  // Separate equity/ETF/cash from options
-  const nonOptions = _posData.filter(p => p.asset_type !== 'OPTION');
-  const options    = _posData.filter(p => p.asset_type === 'OPTION');
-
-  // Sort non-option rows
-  if (_posSortCol) {
-    nonOptions.sort((a, b) => {
-      let av = a[_posSortCol], bv = b[_posSortCol];
-      if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
-      if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
-      if (typeof av === 'string') av = av.toLowerCase();
-      if (typeof bv === 'string') bv = bv.toLowerCase();
-      return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
+async function movePositionList(listId, delta) {
+  const listsSorted = (_posLists || []).slice().sort((a, b) => {
+    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+    return a.id - b.id;
+  });
+  const idx = listsSorted.findIndex(l => l.id === listId);
+  if (idx < 0) return;
+  const nidx = idx + delta;
+  if (nidx < 0 || nidx >= listsSorted.length) return;
+  const order = listsSorted.map(l => l.id);
+  const t = order[idx];
+  order[idx] = order[nidx];
+  order[nidx] = t;
+  try {
+    const res = await fetchJson('/api/position-lists/reorder', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
     });
+    _posLists = res.lists || _posLists;
+    _renderPositions();
+  } catch (e) {
+    alert(e.message || String(e));
   }
+}
 
-  // Build a map: underlying → [option positions]
+function _posVsRecentSortValue(underlying, equityRow) {
+  const met = _posRecentMetrics[underlying];
+  if (!met) return null;
+  const cur = equityRow && equityRow.asset_type !== 'OPTION' ? equityRow.current_price : null;
+  if (cur == null) return null;
+  const isShort = equityRow.quantity < 0;
+  const diff = cur - met.avg_price;
+  const pct = met.avg_price ? (diff / met.avg_price) * 100 : 0;
+  return isShort ? -pct : pct;
+}
+
+function _posSortCompare(a, b) {
+  if (!_posSortCol) return 0;
+  if (_posSortCol === 'recent_avg') {
+    const ma = _posRecentMetrics[a.symbol];
+    const mb = _posRecentMetrics[b.symbol];
+    let av = ma ? ma.avg_price : null;
+    let bv = mb ? mb.avg_price : null;
+    if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
+    if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
+    return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
+  }
+  if (_posSortCol === 'vs_recent_pct') {
+    let av = _posVsRecentSortValue(a.symbol, a);
+    let bv = _posVsRecentSortValue(b.symbol, b);
+    if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
+    if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
+    return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
+  }
+  let av = a[_posSortCol];
+  let bv = b[_posSortCol];
+  if (av == null) av = _posSortDir > 0 ? Infinity : -Infinity;
+  if (bv == null) bv = _posSortDir > 0 ? Infinity : -Infinity;
+  if (typeof av === 'string') av = av.toLowerCase();
+  if (typeof bv === 'string') bv = bv.toLowerCase();
+  return av < bv ? -_posSortDir : av > bv ? _posSortDir : 0;
+}
+
+function _posBlocksForList(listId) {
+  const nonOptions = _posData.filter(p => p.asset_type !== 'OPTION');
+  const options = _posData.filter(p => p.asset_type === 'OPTION');
   const optMap = {};
   options.forEach(p => {
-    const key = p.underlying_symbol || p.symbol.split(/\s+/)[0];
+    const key = _posUnderlyingFromOption(p);
     (optMap[key] = optMap[key] || []).push(p);
   });
-
-  // Sort each group's options: by expiry (ascending) then strike (ascending) then put/call
   Object.values(optMap).forEach(grp => grp.sort((a, b) => {
-    const expA = a.option_expiry || '', expB = b.option_expiry || '';
+    const expA = a.option_expiry || '';
+    const expB = b.option_expiry || '';
     if (expA !== expB) return expA < expB ? -1 : 1;
-    const stA = a.option_strike ?? 0, stB = b.option_strike ?? 0;
+    const stA = a.option_strike ?? 0;
+    const stB = b.option_strike ?? 0;
     if (stA !== stB) return stA - stB;
-    const pcA = a.put_call || '', pcB = b.put_call || '';
+    const pcA = a.put_call || '';
+    const pcB = b.put_call || '';
     return pcA < pcB ? -1 : pcA > pcB ? 1 : 0;
   }));
-
-  // Collect underlyings that have options but no matching equity row
   const equitySymbols = new Set(nonOptions.map(p => p.symbol));
-  const orphanUnderlyings = [...new Set(
-    Object.keys(optMap).filter(u => !equitySymbols.has(u))
-  )].sort();
+  const orphanUnderlyings = [...new Set(Object.keys(optMap).filter(u => !equitySymbols.has(u)))];
 
-  const html = [];
+  let bucket = nonOptions.filter(p => (_posAssignments[p.symbol] || POSITION_LIST_OTHER_ID) === listId);
+  if (_posSortCol) bucket = bucket.slice().sort(_posSortCompare);
 
-  // Format ISO expiry "2026-04-10" → "Apr 10 '26"
+  let orph = orphanUnderlyings.filter(u => (_posAssignments[u] || POSITION_LIST_OTHER_ID) === listId);
+  if (_posSortCol) {
+    orph = orph.slice().sort((a, b) => _posSortCompare({ symbol: a }, { symbol: b }));
+  }
+
+  const equityBlocks = bucket.map(p => ({ kind: 'equity', p, opts: optMap[p.symbol] || [] }));
+  const orphanBlocks = orph.map(u => ({ kind: 'orphan', underlying: u, opts: optMap[u] || [] }));
+
+  if (_posSortCol) {
+    return [...equityBlocks, ...orphanBlocks];
+  }
+
+  const symKey = b => (b.kind === 'equity' ? b.p.symbol : b.underlying);
+  return [...equityBlocks, ...orphanBlocks].sort((a, b) => {
+    const va = _posVolume365[symKey(a)] ?? 0;
+    const vb = _posVolume365[symKey(b)] ?? 0;
+    if (vb !== va) return vb - va;
+    return symKey(a).localeCompare(symKey(b));
+  });
+}
+
+function _posRecentMetricCells(underlying, equityRow) {
+  const met = _posRecentMetrics[underlying];
+  if (!met) {
+    return {
+      recent: '<span class="pos-metric-na" title="Need 10+ equity fills in last 365d (equity only)">N/A</span>',
+      vs: '—',
+    };
+  }
+  const recentCell = '$' + fmt(met.avg_price, 2);
+  const cur = equityRow && equityRow.asset_type !== 'OPTION' ? equityRow.current_price : null;
+  if (cur == null) {
+    return { recent: recentCell, vs: '<span class="pos-metric-na">N/A</span>' };
+  }
+  const isShort = equityRow.quantity < 0;
+  const diff = cur - met.avg_price;
+  const pct = met.avg_price ? (diff / met.avg_price) * 100 : 0;
+  const favorable = isShort ? diff < 0 : diff > 0;
+  const uClass = favorable ? 'pos' : 'neg';
+  const vsStr = `<span class="${uClass}">${fmtD(diff, 2)} (${fmtD(pct, 2)}%)</span>`;
+  return { recent: recentCell, vs: vsStr };
+}
+
+function _renderPositions() {
+  bindPositionsDnD();
+
   const fmtExpiry = iso => {
     if (!iso) return '—';
     const [y, m, d] = iso.split('-');
-    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m,10)-1];
-    return `${mon} ${parseInt(d,10)} '${y.slice(2)}`;
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(m, 10) - 1];
+    return `${mon} ${parseInt(d, 10)} '${y.slice(2)}`;
   };
 
-  // Helper: render one data row (equity/ETF/cash or option child)
-  const dataRow = (p, isChild = false) => {
+  const _isExpiringSoon = iso => {
+    if (!iso) return false;
+    const diff = (new Date(iso) - new Date()) / 86400000;
+    return diff >= 0 && diff <= 7;
+  };
+
+  const dataRow = (p, isChild, underlyingKey, listId) => {
     const isOpt = p.asset_type === 'OPTION';
-    const pd    = isOpt ? 4 : 2;
+    const pd = isOpt ? 4 : 2;
     const pcBadge = p.put_call
       ? `<span class="badge badge-${p.put_call}" style="font-size:10px;padding:1px 6px">${p.put_call}</span>`
       : '—';
-
-    // For option child rows: show a clean "$STRIKE" label with full OCC in tooltip
-    // For equity rows: show bold ticker; expiry cell is empty
-    let symbolCell, expiryCell;
+    let symbolCell;
+    let expiryCell;
     if (isChild) {
       const strikeLabel = p.option_strike != null ? `$${Number(p.option_strike).toFixed(2)}` : esc(p.symbol);
       symbolCell = `<span class="pos-opt-symbol" title="${esc(p.symbol)}">${strikeLabel}</span>`;
@@ -350,101 +596,290 @@ function _renderPositions() {
       symbolCell = `<b>${esc(p.symbol)}</b>`;
       expiryCell = '';
     }
-
-    return `<tr class="${isChild ? 'pos-opt-row' : ''}">
-      <td></td>
+    const uK = underlyingKey || p.symbol;
+    let recentC;
+    let vsC;
+    if (isChild) {
+      recentC = '—';
+      vsC = '—';
+    } else {
+      const cells = _posRecentMetricCells(uK, p);
+      recentC = cells.recent;
+      vsC = cells.vs;
+    }
+    const firstTd = isChild
+      ? '<td></td>'
+      : `<td><span class="pos-drag-handle" draggable="true" data-underlying="${esc(uK)}" title="Drag to move to another list">☰</span></td>`;
+    const trOpen = isChild
+      ? '<tr class="pos-opt-row">'
+      : `<tr class="pos-equity-row pos-symbol-reorder-target" data-list-id="${listId}" data-pos-block="${esc(p.symbol)}">`;
+    return `${trOpen}
+      ${firstTd}
       <td>${symbolCell}</td>
       <td><span class="badge badge-${p.asset_type}">${p.asset_type}</span></td>
       <td>${pcBadge}</td>
       <td>${expiryCell}</td>
-      <td>${fmt(p.quantity,0)}</td>
-      <td>${p.avg_price!=null?'$'+fmt(p.avg_price,pd):'—'}</td>
-      <td>${p.current_price!=null?'$'+fmt(p.current_price,pd):'—'}</td>
-      <td>${p.market_value!=null?'$'+fmt(p.market_value):'—'}</td>
-      <td class="${cls(p.unrealized_pl)}">${p.unrealized_pl!=null?'$'+fmtD(p.unrealized_pl):'—'}</td>
-      <td class="${cls(p.day_pl)}">${p.day_pl!=null?'$'+fmtD(p.day_pl):'—'}</td>
-      <td class="${cls(p.day_pl_pct)}">${p.day_pl_pct!=null?fmtD(p.day_pl_pct)+'%':'—'}</td>
+      <td>${fmt(p.quantity, 0)}</td>
+      <td>${p.avg_price != null ? '$' + fmt(p.avg_price, pd) : '—'}</td>
+      <td>${p.current_price != null ? '$' + fmt(p.current_price, pd) : '—'}</td>
+      <td class="pos-num">${recentC}</td>
+      <td class="pos-num">${vsC}</td>
+      <td>${p.market_value != null ? '$' + fmt(p.market_value) : '—'}</td>
+      <td class="${cls(p.unrealized_pl)}">${p.unrealized_pl != null ? '$' + fmtD(p.unrealized_pl) : '—'}</td>
+      <td class="${cls(p.day_pl)}">${p.day_pl != null ? '$' + fmtD(p.day_pl) : '—'}</td>
+      <td class="${cls(p.day_pl_pct)}">${p.day_pl_pct != null ? fmtD(p.day_pl_pct) + '%' : '—'}</td>
     </tr>`;
   };
 
-  // Flag options expiring within 7 days
-  const _isExpiringSoon = iso => {
-    if (!iso) return false;
-    const diff = (new Date(iso) - new Date()) / 86400000;
-    return diff >= 0 && diff <= 7;
-  };
-
-  // Helper: render options toggle row for a given underlying key
-  const toggleRow = (underlying, opts) => {
-    const expanded  = _posExpanded.has(underlying);
-    const arrow     = expanded ? '▼' : '▶';
-    const optCount  = opts.length;
-    const totalMv   = opts.reduce((s, o) => s + (o.market_value || 0), 0);
-    const totalUpl  = opts.every(o => o.unrealized_pl != null)
-                      ? opts.reduce((s, o) => s + (o.unrealized_pl || 0), 0) : null;
-    const mvStr     = '$' + fmt(totalMv);
-    const uplStr    = totalUpl != null
+  const toggleRow = (underlying, opts, equityParent, isOrphan, listId) => {
+    const expanded = _posExpanded.has(underlying);
+    const arrow = expanded ? '▼' : '▶';
+    const optCount = opts.length;
+    const totalMv = opts.reduce((s, o) => s + (o.market_value || 0), 0);
+    const totalUpl = opts.every(o => o.unrealized_pl != null)
+      ? opts.reduce((s, o) => s + (o.unrealized_pl || 0), 0) : null;
+    const mvStr = '$' + fmt(totalMv);
+    const uplStr = totalUpl != null
       ? `<span class="${cls(totalUpl)}">$${fmtD(totalUpl)}</span>` : '—';
-    return `<tr class="pos-opt-toggle" onclick="togglePosGroup('${esc(underlying)}')">
-      <td class="pos-toggle-arrow">${arrow}</td>
+    const eqForMet = equityParent || null;
+    const { recent: rc, vs: vc } = _posRecentMetricCells(underlying, eqForMet);
+    const trClass = 'pos-opt-toggle' + (isOrphan ? ' pos-symbol-reorder-target' : '');
+    const firstToggleTd = isOrphan
+      ? `<td class="pos-toggle-arrow"><span class="pos-drag-handle" draggable="true" data-underlying="${esc(underlying)}" title="Drag to move to another list">☰</span><span class="pos-opt-expand-btn">${arrow}</span></td>`
+      : `<td class="pos-toggle-arrow"><span class="pos-opt-expand-btn">${arrow}</span></td>`;
+    return `<tr class="${trClass}" data-expand-underlying="${esc(underlying)}" data-list-id="${listId}" data-pos-block="${esc(underlying)}">
+      ${firstToggleTd}
       <td colspan="4" class="pos-toggle-label">
         <span class="pos-toggle-ticker">${esc(underlying)}</span>
         <span class="pos-toggle-meta">${optCount} option position${optCount !== 1 ? 's' : ''}</span>
       </td>
       <td></td><td></td><td></td>
+      <td class="pos-num">${rc}</td>
+      <td class="pos-num">${vc}</td>
       <td>${mvStr}</td>
       <td>${uplStr}</td>
       <td></td><td></td>
     </tr>`;
   };
 
-  // Render each equity/ETF/cash row + its options toggle below it
-  for (const p of nonOptions) {
-    html.push(dataRow(p, false));
-    const opts = optMap[p.symbol];
-    if (opts && opts.length) {
-      html.push(toggleRow(p.symbol, opts));
-      if (_posExpanded.has(p.symbol)) {
-        opts.forEach(o => html.push(dataRow(o, true)));
+  const thead = `<thead><tr>
+    <th style="width:28px"></th>
+    <th class="sortable" onclick="sortPositions('symbol')">Symbol / Strike <span class="sort-arrow" data-pa="symbol"></span></th>
+    <th>Type</th>
+    <th>P/C</th>
+    <th>Expiry</th>
+    <th class="sortable" onclick="sortPositions('quantity')">Qty <span class="sort-arrow" data-pa="quantity"></span></th>
+    <th class="sortable" onclick="sortPositions('avg_price')">Avg Price <span class="sort-arrow" data-pa="avg_price"></span></th>
+    <th class="sortable" onclick="sortPositions('current_price')">Mkt Price <span class="sort-arrow" data-pa="current_price"></span></th>
+    <th class="sortable" onclick="sortPositions('recent_avg')">10-fill avg <span class="sort-arrow" data-pa="recent_avg"></span></th>
+    <th class="sortable" onclick="sortPositions('vs_recent_pct')">vs recent <span class="sort-arrow" data-pa="vs_recent_pct"></span></th>
+    <th class="sortable" onclick="sortPositions('market_value')">Mkt Value <span class="sort-arrow" data-pa="market_value"></span></th>
+    <th class="sortable" onclick="sortPositions('unrealized_pl')">Unrealized P&amp;L <span class="sort-arrow" data-pa="unrealized_pl"></span></th>
+    <th class="sortable" onclick="sortPositions('day_pl')">Day P&amp;L <span class="sort-arrow" data-pa="day_pl"></span></th>
+    <th class="sortable" onclick="sortPositions('day_pl_pct')">Day % <span class="sort-arrow" data-pa="day_pl_pct"></span></th>
+  </tr></thead>`;
+
+  const listsSorted = (_posLists || []).slice().sort((a, b) => {
+    if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+    return a.id - b.id;
+  });
+
+  const nLists = listsSorted.length;
+  const sections = listsSorted.map((list, idx) => {
+    const blocks = _posBlocksForList(list.id);
+    const inner = [];
+    blocks.forEach(block => {
+      if (block.kind === 'equity') {
+        inner.push(dataRow(block.p, false, block.p.symbol, list.id));
+        const opts = block.opts;
+        if (opts.length) {
+          inner.push(toggleRow(block.p.symbol, opts, block.p, false, list.id));
+          if (_posExpanded.has(block.p.symbol)) {
+            opts.forEach(o => inner.push(dataRow(o, true, block.p.symbol, list.id)));
+          }
+        }
+      } else {
+        inner.push(toggleRow(block.underlying, block.opts, null, true, list.id));
+        if (_posExpanded.has(block.underlying)) {
+          block.opts.forEach(o => inner.push(dataRow(o, true, block.underlying, list.id)));
+        }
       }
-    }
-  }
+    });
+    const count = blocks.reduce((n, b) => n + 1 + (b.opts && b.opts.length ? 1 : 0), 0);
+    const deleteBtn = list.is_system ? '' :
+      `<button type="button" class="pos-list-delete-btn" title="Delete list"
+        onclick="event.preventDefault();event.stopPropagation();deletePositionList(${list.id})">✕</button>`;
+    const renameBtn = `<button type="button" class="pos-list-rename-btn" title="Rename"
+      onclick="event.preventDefault();event.stopPropagation();beginPositionListRename(${list.id})">✎</button>`;
+    const moveBtns = `<span class="pos-list-move-btns">
+      <button type="button" class="pos-list-move-btn" title="Move list up" ${idx === 0 ? 'disabled' : ''}
+        onclick="event.preventDefault();event.stopPropagation();movePositionList(${list.id},-1)">↑</button>
+      <button type="button" class="pos-list-move-btn" title="Move list down" ${idx >= nLists - 1 ? 'disabled' : ''}
+        onclick="event.preventDefault();event.stopPropagation();movePositionList(${list.id},1)">↓</button>
+    </span>`;
+    return `<details class="pos-list-section" open data-list-id="${list.id}">
+      <summary class="pos-list-summary pos-list-dropzone" data-list-id="${list.id}">
+        <span class="pos-list-summary-title" id="pos-list-title-${list.id}">${esc(list.name)}</span>
+        ${renameBtn}
+        ${moveBtns}
+        ${deleteBtn}
+        <span class="pos-list-count">${blocks.length} underlying</span>
+      </summary>
+      <div class="table-wrap pos-list-table-wrap pos-list-dropzone" data-list-id="${list.id}">
+        <table class="pos-tbl">${thead}<tbody>${inner.join('') || '<tr><td colspan="14" class="pos-list-empty">Drop tickers here</td></tr>'}</tbody></table>
+      </div>
+    </details>`;
+  });
 
-  // Orphan option groups (options with no equity parent in the account)
-  for (const underlying of orphanUnderlyings) {
-    const opts = optMap[underlying];
-    html.push(toggleRow(underlying, opts));
-    if (_posExpanded.has(underlying)) {
-      opts.forEach(o => html.push(dataRow(o, true)));
-    }
-  }
+  const el = document.getElementById('pos-sections');
+  if (el) el.innerHTML = sections.join('');
 
-  document.getElementById('pos-tbody').innerHTML = html.join('');
-
-  // Update sort arrows
-  ['symbol','quantity','avg_price','current_price','market_value','unrealized_pl','day_pl','day_pl_pct'].forEach(col => {
-    const el = document.getElementById('pa-' + col);
-    if (el) el.textContent = col === _posSortCol ? (_posSortDir > 0 ? ' ▲' : ' ▼') : '';
+  const cols = ['symbol', 'quantity', 'avg_price', 'current_price', 'recent_avg', 'vs_recent_pct',
+    'market_value', 'unrealized_pl', 'day_pl', 'day_pl_pct'];
+  document.querySelectorAll('#pos-sections .sort-arrow[data-pa]').forEach(span => {
+    const col = span.getAttribute('data-pa');
+    span.textContent = col === _posSortCol ? (_posSortDir > 0 ? ' ▲' : ' ▼') : '';
   });
 }
 
 function sortPositions(col) {
   if (_posSortCol === col) _posSortDir *= -1;
-  else { _posSortCol = col; _posSortDir = 1; }
+  else {
+    _posSortCol = col;
+    _posSortDir = 1;
+  }
   _renderPositions();
 }
 
 async function loadPositions() {
   try {
-    const data = await fetchJson('/api/positions');
+    const [data, listsRes] = await Promise.all([
+      fetchJson('/api/positions'),
+      fetchJson('/api/position-lists'),
+    ]);
     _posData = data;
+    _posLists = listsRes.lists || [];
+    const { underlyings, short_equity } = _collectPositionTabKeys(data);
+    const sync = await fetchJson('/api/position-assignments/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ underlyings, short_equity }),
+    });
+    _posAssignments = sync.assignments || {};
+    _posVolume365 = sync.volume_365d || {};
+    const metrics = await fetchJson('/api/position-recent-metrics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: underlyings }),
+    });
+    _posRecentMetrics = metrics.metrics || {};
+    document.getElementById('pos-loading').style.display = 'none';
+    document.getElementById('pos-error').style.display = 'none';
+    const wrap = document.getElementById('pos-table-wrap');
+    const toolbar = document.getElementById('pos-toolbar');
+    if (wrap) wrap.style.display = 'block';
+    if (toolbar) toolbar.style.display = 'flex';
     _renderPositions();
-    document.getElementById('pos-loading').style.display='none';
-    document.getElementById('pos-table').style.display='block';
-  } catch(e) {
-    document.getElementById('pos-loading').style.display='none';
-    document.getElementById('pos-error').style.display='block';
-    document.getElementById('pos-error').textContent='Error: '+e.message;
+  } catch (e) {
+    document.getElementById('pos-loading').style.display = 'none';
+    document.getElementById('pos-error').style.display = 'block';
+    document.getElementById('pos-error').textContent = 'Error: ' + e.message;
+  }
+}
+
+function showNewPositionListForm() {
+  document.getElementById('pos-new-form').style.display = 'flex';
+  document.getElementById('pos-new-list-btn').style.display = 'none';
+  document.getElementById('pos-new-name-input').focus();
+}
+
+function hideNewPositionListForm() {
+  document.getElementById('pos-new-form').style.display = 'none';
+  document.getElementById('pos-new-list-btn').style.display = '';
+  document.getElementById('pos-new-name-input').value = '';
+}
+
+async function createPositionList() {
+  const name = document.getElementById('pos-new-name-input').value.trim();
+  if (!name) return;
+  try {
+    await fetchJson('/api/position-lists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const listsRes = await fetchJson('/api/position-lists');
+    _posLists = listsRes.lists || [];
+    hideNewPositionListForm();
+    _renderPositions();
+  } catch (e) {
+    alert(e.message || String(e));
+  }
+}
+
+async function beginPositionListRename(listId) {
+  const span = document.getElementById('pos-list-title-' + listId);
+  if (!span) return;
+  const cur = span.textContent;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'pos-list-rename-input';
+  input.value = cur;
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = async commit => {
+    if (finished) return;
+    finished = true;
+    if (!input.parentNode) return;
+    const newSpan = document.createElement('span');
+    newSpan.className = 'pos-list-summary-title';
+    newSpan.id = 'pos-list-title-' + listId;
+    if (commit) {
+      const v = input.value.trim();
+      if (v && v !== cur) {
+        try {
+          await fetchJson('/api/position-lists/' + listId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: v }),
+          });
+          const listsRes = await fetchJson('/api/position-lists');
+          _posLists = listsRes.lists || [];
+        } catch (e) {
+          alert(e.message || String(e));
+        }
+      }
+    }
+    const L = _posLists.find(l => l.id === listId);
+    newSpan.textContent = L ? L.name : cur;
+    input.replaceWith(newSpan);
+  };
+
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+    if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+async function deletePositionList(listId) {
+  const otherName = (_posLists.find(l => l.id === POSITION_LIST_OTHER_ID) || {}).name || 'Other';
+  if (!confirm(`Delete this list? Tickers on it will move to “${otherName}”.`)) return;
+  try {
+    await fetchJson('/api/position-lists/' + listId, { method: 'DELETE' });
+    Object.keys(_posAssignments).forEach(sym => {
+      if (_posAssignments[sym] === listId) {
+        _posAssignments[sym] = POSITION_LIST_OTHER_ID;
+      }
+    });
+    const listsRes = await fetchJson('/api/position-lists');
+    _posLists = listsRes.lists || [];
+    _renderPositions();
+  } catch (e) {
+    alert(e.message || String(e));
   }
 }
 
