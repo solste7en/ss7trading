@@ -83,6 +83,9 @@ export const store = {
   _chainPageIdx: 0,
   _chainVisibleStrikes: [],
 
+  analyticsState: { loaded: false },
+  consolidationState: { loaded: false, overlapData: null },
+
   wlState: { lists: [], currentId: 'positions', initialized: false },
   historyState: { page: 1, loaded: false },
   gainsState: { page: 1, loaded: false },

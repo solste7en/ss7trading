@@ -24,6 +24,8 @@ export function switchTab(name) {
     window.loadStrategySuggestions(store._stratTicker);
     window.loadStrategyOrders();
   }
+  if (name === 'analytics' && !store.analyticsState.loaded) window.loadAnalytics();
+  if (name === 'consolidation' && !store.consolidationState.loaded) window.loadConsolidation();
 }
 
 export function refreshCurrent() {
@@ -44,4 +46,6 @@ export function refreshCurrent() {
     window.loadStrategyOrders();
     window.loadStrategyRecent();
   }
+  if (store.currentTab === 'analytics') window.loadAnalytics();
+  if (store.currentTab === 'consolidation') window.loadConsolidation();
 }

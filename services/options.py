@@ -283,3 +283,129 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                 })
 
     return suggestions
+
+
+def suggest_underwater_strategies(positions, quote, chain_data, ticker, peer_data=None):
+    """Generate strategy suggestions specifically for underwater equity positions.
+
+    Focuses on:
+    - Covered calls near cost basis to generate income while waiting for recovery
+    - Comparison of "hold + sell calls" vs "sell now" tax-loss economics
+    - ETF swap suggestions from peer_data
+    """
+    suggestions = []
+    last = quote.get("last")
+    if last is None:
+        return suggestions
+
+    eq_pos = [p for p in positions
+              if p["asset_type"] in ("EQUITY", "ETF") and p["symbol"] == ticker]
+    if not eq_pos:
+        return suggestions
+
+    eq_qty = sum(p["quantity"] for p in eq_pos)
+    if eq_qty <= 0:
+        return suggestions
+
+    avg_price = eq_pos[0].get("avg_price")
+    if avg_price is None or last >= avg_price:
+        return suggestions
+
+    unrealized_pl = sum(p.get("unrealized_pl") or 0 for p in eq_pos)
+    coverable = abs(eq_qty) // 100
+    if coverable < 1:
+        return suggestions
+
+    exps = sorted(chain_data.get("expirations", []))
+    calls_map = chain_data.get("calls", {})
+    usable_exps = [e for e in exps if calls_map.get(e)][:3]
+
+    for expiry in usable_exps:
+        calls = calls_map.get(expiry, [])
+        days_to_exp = max(1, (datetime.date.fromisoformat(expiry) - datetime.date.today()).days)
+
+        near_cost_calls = [c for c in calls
+                           if c["strike"] and c["bid"] and c["bid"] > 0.05
+                           and abs(c["strike"] - avg_price) / avg_price < 0.10]
+        near_cost_calls.sort(key=lambda c: abs(c["strike"] - avg_price))
+
+        for c in near_cost_calls[:2]:
+            premium = c["bid"]
+            total_prem = premium * coverable * 100
+            ann_yield = (premium / last) * (365 / days_to_exp)
+            months_to_breakeven = abs(unrealized_pl) / total_prem if total_prem > 0 else float("inf")
+
+            suggestions.append({
+                "id": f"uw_cc_cost_{expiry}_{c['strike']}",
+                "strategy": "underwater_covered_call",
+                "title": f"CC Near Cost Basis @ ${c['strike']:.2f}",
+                "description": (f"Sell {coverable} CALL @ ${c['strike']:.2f}, {expiry} "
+                                f"(your avg cost: ${avg_price:.2f})"),
+                "detail": (f"Premium: ${premium:.2f}/sh (${total_prem:,.0f} total) · "
+                           f"{ann_yield:.0%} ann. yield · "
+                           f"~{months_to_breakeven:.0f} cycles to recover ${abs(unrealized_pl):,.0f} loss"),
+                "premium_per_share": premium,
+                "total_premium": total_prem,
+                "annualized_yield": round(ann_yield, 4),
+                "months_to_recover": round(months_to_breakeven, 1),
+                "days_to_expiry": days_to_exp,
+            })
+
+        otm_calls = [c for c in calls
+                     if c["strike"] and c["strike"] > last
+                     and c["bid"] and c["bid"] > 0.05]
+        otm_calls.sort(key=lambda c: c["strike"])
+
+        for c in otm_calls[:2]:
+            premium = c["bid"]
+            total_prem = premium * coverable * 100
+            ann_yield = (premium / last) * (365 / days_to_exp)
+            upside_to_strike = (c["strike"] - last) / last
+
+            suggestions.append({
+                "id": f"uw_cc_otm_{expiry}_{c['strike']}",
+                "strategy": "underwater_covered_call_otm",
+                "title": f"CC OTM @ ${c['strike']:.2f}",
+                "description": (f"Sell {coverable} CALL @ ${c['strike']:.2f}, {expiry} "
+                                f"({upside_to_strike:.1%} above current)"),
+                "detail": (f"Premium: ${premium:.2f}/sh (${total_prem:,.0f} total) · "
+                           f"{ann_yield:.0%} ann. yield · "
+                           f"Allows recovery up to ${c['strike']:.2f}"),
+                "premium_per_share": premium,
+                "total_premium": total_prem,
+                "annualized_yield": round(ann_yield, 4),
+                "days_to_expiry": days_to_exp,
+            })
+
+    tax_loss = abs(unrealized_pl)
+    tax_savings_st = round(tax_loss * 0.37, 2)
+    tax_savings_lt = round(tax_loss * 0.20, 2)
+    suggestions.append({
+        "id": f"uw_sell_{ticker}",
+        "strategy": "sell_and_harvest",
+        "title": "Sell & Harvest Tax Loss",
+        "description": f"Sell all {eq_qty} shares of {ticker} at ~${last:.2f}",
+        "detail": (f"Realize ${tax_loss:,.0f} loss · "
+                   f"Est. tax savings: ${tax_savings_st:,.0f} (short-term) "
+                   f"or ${tax_savings_lt:,.0f} (long-term)"),
+        "tax_loss": tax_loss,
+        "tax_savings_short_term": tax_savings_st,
+        "tax_savings_long_term": tax_savings_lt,
+    })
+
+    if peer_data:
+        etfs = peer_data.get("etfs", [])
+        if etfs:
+            suggestions.append({
+                "id": f"uw_etf_swap_{ticker}",
+                "strategy": "etf_swap",
+                "title": f"Swap to {etfs[0]} (Sector ETF)",
+                "description": (f"Sell {ticker}, buy {etfs[0]} to maintain "
+                                f"{peer_data.get('sector', '')} exposure"),
+                "detail": (f"Harvest ${tax_loss:,.0f} tax loss while keeping sector exposure. "
+                           f"ETF options: {', '.join(etfs[:3])}"),
+                "etfs": etfs[:5],
+                "tax_loss": tax_loss,
+            })
+
+    return suggestions

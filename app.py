@@ -8,6 +8,7 @@ import logging
 
 from flask import Flask, jsonify, render_template
 
+from blueprints.analytics import bp as analytics_bp
 from blueprints.balance import bp as balance_bp
 from blueprints.income import bp as income_bp
 from blueprints.options import bp as options_bp
@@ -21,6 +22,7 @@ from blueprints.watchlists import bp as watchlists_bp
 app = Flask(__name__)
 log = logging.getLogger(__name__)
 
+app.register_blueprint(analytics_bp)
 app.register_blueprint(positions_bp)
 app.register_blueprint(balance_bp)
 app.register_blueprint(quotes_bp)

@@ -43,6 +43,10 @@ import {
   loadOrders, sortOrders, filterOrders, cancelOrder,
 } from './orders.js';
 import {
+  loadAnalytics, loadConsolidation, loadConsolidationDetail,
+  selectConsolidationList,
+} from './analytics.js';
+import {
   setStrategyMode, onStrategyTickerChange, loadStrategyExpirations,
   loadStrategyChain, shiftChainPage, onStratChainClick,
   loadStrategySuggestions, applyStrategySuggestion,
@@ -57,6 +61,8 @@ import {
 Object.assign(window, {
   // tabs
   switchTab, refreshCurrent,
+  // analytics
+  loadAnalytics, loadConsolidation, loadConsolidationDetail, selectConsolidationList,
   // overview
   loadOverview, loadTickerPage, openLadder, searchCustomTicker, loadCustomTickerPage,
   loadBalance,

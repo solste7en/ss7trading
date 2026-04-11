@@ -2,7 +2,7 @@
 
 A personal trading dashboard and order management tool built on the Schwab API. Tracks positions and trade history, syncs transactions to a local SQLite database, and supports order entry — including ladder orders and multi-leg options strategies — directly from the browser.
 
-**Current version: 0.2.2**
+**Current version: 0.3.0**
 
 ---
 
@@ -59,6 +59,8 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 |-----|-------------|
 | **Overview** | Top 10 most-traded tickers with recent equity trades, paginated; custom ticker lookup with options toggle |
 | **Positions** | Live positions with market value, current price, unrealized P&L, and day P&L; sortable columns; ETF badge; options grouped under underlying with expand/collapse; PUT/CALL type and expiry columns |
+| **📊 Analytics** | Portfolio performance charts (equity curve, daily P&L, drawdown), sector/industry exposure, HHI concentration score, income strategy breakdown; powered by balance snapshots + yfinance |
+| **🔍 Consolidate** | Underwater positions list; sector overlap detection; peer comparison with composite scoring; ETF alternatives; tax-loss harvest candidates; covered call strategies for underwater positions |
 | **Quote** | Live quote for any symbol + quotes for held positions or custom watchlists (saved to DB) |
 | **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword; **Sync from Schwab** with last-sync time and results modal |
 | **📊 Income P&L** | Option income strategy performance tracker: clickable KPI cards, paginated trade table with expandable leg detail, filters by ticker/status/strategy/outcome; "Sync from Schwab" rebuilds from API |

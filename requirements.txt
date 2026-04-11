@@ -1,6 +1,7 @@
 schwab-py
 flask>=3.0.0
 python-dotenv>=1.0.0
+yfinance>=0.2.0
 pytest>=8.0.0
 pytest-benchmark>=5.0.0
 pytest-cov>=6.0.0

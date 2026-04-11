@@ -4,6 +4,59 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [0.3.0] — 2026-04-11
+
+Major feature release: **Analytics** and **Consolidation Intelligence** tabs. Portfolio-level performance tracking, sector exposure analysis, and an intelligent consolidation engine for overlapping/underwater positions with peer comparison, ETF alternatives, tax-loss harvesting, and options strategy suggestions.
+
+### New: 📊 Analytics tab (Insight group)
+
+Portfolio analytics powered by balance snapshots and external fundamentals from Yahoo Finance (`yfinance`).
+
+- **Equity curve** — line chart of account value over time from daily balance snapshots
+- **Daily P&L** — bar chart showing day-over-day value changes with positive/negative coloring
+- **Drawdown** — area chart tracking peak-to-trough decline percentage
+- **KPI cards** — current value, total return %, last day P&L, max drawdown, data points
+- **Sector exposure** — doughnut chart + table showing sector breakdown with market values, weights, and constituent tickers; powered by yfinance sector/industry classification
+- **Concentration** — HHI (Herfindahl index) score with "Diversified / Moderate / Concentrated" label; top-15 holdings by portfolio weight as a horizontal bar chart
+- **Income performance** — monthly P&L chart + strategy breakdown table (count, P&L, win rate per strategy type)
+
+### New: 🔍 Consolidate tab (Insight group)
+
+Consolidation intelligence engine for managing overlapping and underwater positions.
+
+- **Underwater positions list** — all equity positions with negative unrealized P&L, sorted by loss magnitude; each row has an "Analyze" button for deep-dive analysis
+- **Sector overlap detector** — groups holdings by sector/industry to find duplicate exposure (e.g., "you hold 3 semiconductor stocks"); groups with 2+ tickers shown as color-coded cards
+- **Peer comparison** — composite scoring algorithm ranks tickers within each overlap group on: revenue growth, profit margins, ROE, 52-week momentum, and position P/L; top scorer marked "keep", others "consolidate"
+- **Consolidation detail panel** — click any ticker to see full fundamentals, peer comparison table, ETF alternatives, and tax-loss swap candidates
+- **ETF alternatives** — curated mapping of ~30 sector/industry combinations to well-known ETFs (SMH, XLK, XBI, etc.); fetches live ETF info from yfinance
+- **Tax-loss harvest candidates** — suggests similar-but-not-identical stocks and sector ETFs for harvesting; includes IRS wash sale rule warning
+- **Underwater position strategies** — when analyzing an underwater position: covered calls near cost basis (with annualized yield and recovery timeline), OTM covered calls, sell-and-harvest tax loss comparison, and ETF swap suggestions
+
+### Backend
+
+- **`blueprints/analytics.py`** — 7 new API routes: `/api/analytics/performance`, `/exposure`, `/concentration`, `/income-summary`, `/consolidation`, `/consolidation/<symbol>`, `/underwater-strategies/<symbol>`
+- **`services/analytics.py`** — pure logic: `compute_performance_series`, `compute_exposure`, `compute_concentration`, `find_overlap_groups`, `score_consolidation_candidates`, `suggest_tax_loss_swaps`
+- **`services/peers.py`** — yfinance integration with 24-hour SQLite cache (`peer_cache` table); batch fetching; curated ETF mapping; peer discovery within portfolio
+- **`services/options.py`** — new `suggest_underwater_strategies` for cost-basis-aware covered calls and tax-loss sell/swap economics
+
+### Frontend
+
+- **`static/js/analytics.js`** — ES module with Chart.js performance charts, sector doughnut, concentration bar chart, consolidation panel, peer comparison tables, underwater strategies cards
+- **`templates/dashboard.html`** — two new tab buttons (📊 Analytics, 🔍 Consolidate) in the Insight group with panel containers
+- **`static/js/main.js`**, **`state.js`**, **`tabs.js`** — wired up analytics module imports, state initialization, tab switching, and refresh handling
+- **`static/css/style.css`** — analytics-specific styles: KPI rows, chart grid, exposure layout, overlap cards, detail panel, fundamentals grid, peer table, ETF cards, strategy cards, wash sale warning
+
+### Dependencies
+
+- **`yfinance`** added to `requirements.txt` — free Yahoo Finance API for sector, industry, fundamentals, and peer data
+
+### Testing
+
+- **`tests/test_analytics.py`** — 33 new tests covering all analytics service functions (performance series, exposure, concentration, overlap groups, consolidation scoring, tax-loss swaps, underwater strategies) plus 5 route smoke tests for new API endpoints
+- Full suite: **196 tests passing**, all linting clean
+
+---
+
 ## [0.2.2] — 2026-04-11
 
 Positions and dashboard polish: clearer short-side metrics, share-weighted recent fills, exposure charts, and more consistent trade quantity display.

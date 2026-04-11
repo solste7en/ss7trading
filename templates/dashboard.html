@@ -37,10 +37,12 @@
 <div class="tabs">
   <div class="tab-group">
     <span class="tab-group-label">Insight</span>
-    <div class="tab active" onclick="switchTab('positions')">Positions</div>
-    <div class="tab"        onclick="switchTab('overview')">Spotlight</div>
-    <div class="tab"        onclick="switchTab('balance')">Balance</div>
-    <div class="tab"        onclick="switchTab('quotes')">Quote</div>
+    <div class="tab active" onclick="switchTab('positions')">📋 Positions</div>
+    <div class="tab"        onclick="switchTab('overview')">🔦 Spotlight</div>
+    <div class="tab"        onclick="switchTab('balance')">🏦 Balance</div>
+    <div class="tab"        onclick="switchTab('analytics')">📊 Analytics</div>
+    <div class="tab"        onclick="switchTab('consolidation')">🔍 Consolidate</div>
+    <div class="tab"        onclick="switchTab('quotes')">💬 Quote</div>
   </div>
   <div class="tab-group-sep"></div>
   <div class="tab-group">
@@ -48,14 +50,14 @@
     <div class="tab"        onclick="switchTab('trade')">⚡ Trade</div>
     <div class="tab"        onclick="switchTab('ladder')">🪜 Ladder</div>
     <div class="tab"        onclick="switchTab('strategy')">💰 Income</div>
-    <div class="tab"        onclick="switchTab('orders')">Open Orders</div>
+    <div class="tab"        onclick="switchTab('orders')">📬 Open Orders</div>
   </div>
   <div class="tab-group-sep"></div>
   <div class="tab-group">
     <span class="tab-group-label">Records</span>
-    <div class="tab"        onclick="switchTab('history')">Trade History</div>
-    <div class="tab"        onclick="switchTab('incomepnl')">📊 Income P&amp;L</div>
-    <div class="tab"        onclick="switchTab('gains')">Realized G/L</div>
+    <div class="tab"        onclick="switchTab('history')">🗂️ Trade History</div>
+    <div class="tab"        onclick="switchTab('incomepnl')">📈 Income P&amp;L</div>
+    <div class="tab"        onclick="switchTab('gains')">💹 Realized G/L</div>
   </div>
 </div>
 
@@ -70,6 +72,20 @@
 <div class="panel" id="tab-balance">
   <div id="balance-content">
     <div class="loading">Loading balances…</div>
+  </div>
+</div>
+
+<!-- ── Analytics ── -->
+<div class="panel" id="tab-analytics">
+  <div id="analytics-content">
+    <div class="loading">Loading analytics…</div>
+  </div>
+</div>
+
+<!-- ── Consolidation ── -->
+<div class="panel" id="tab-consolidation">
+  <div id="consolidation-content">
+    <div class="loading">Loading consolidation analysis…</div>
   </div>
 </div>
 
