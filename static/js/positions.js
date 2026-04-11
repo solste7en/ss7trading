@@ -1,5 +1,5 @@
 import { fmt, fmtD, cls, esc, normalizeQty, fetchJson } from './utils.js';
-import * as S from './state.js';
+import { store as S } from './state.js';
 
 export function _posUnderlyingFromOption(p) {
   return String(p.underlying_symbol || p.symbol.split(/\s+/)[0] || '').toUpperCase();

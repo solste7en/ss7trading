@@ -1,5 +1,5 @@
 import { fmt, fmtD, cls, esc, fetchJson } from './utils.js';
-import * as S from './state.js';
+import { store as S } from './state.js';
 
 export function _ipFormatStrike(s) {
   if (s == null || s === '') return '0';

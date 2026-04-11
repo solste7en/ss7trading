@@ -1,5 +1,5 @@
 import { fmt, fmtD, cls, esc, normalizeQty, fetchJson } from './utils.js';
-import { overviewState, OVERVIEW_LIMIT, customTickerState } from './state.js';
+import { store } from './state.js';
 
 export function _overviewTradeRows(trades) {
   if (!trades.length) return '<tr><td colspan="5" style="color:#64748b">No trades found</td></tr>';
@@ -31,7 +31,7 @@ export async function loadOverview() {
   container.innerHTML = '<div class="loading">Loading top tickers…</div>';
   try {
     const data = await fetchJson('/api/top-tickers');
-    overviewState.loaded = true;
+    store.overviewState.loaded = true;
 
     const cards = data.tickers.map(t => {
       const countLabel = `${t.trade_count.toLocaleString()} trades `
@@ -39,7 +39,7 @@ export async function loadOverview() {
         + ` / ${(t.option_count||0).toLocaleString()} option)</span>`;
 
       const rows = _overviewTradeRows(t.recent_trades);
-      const hasNext = (t.equity_count || 0) > OVERVIEW_LIMIT;
+      const hasNext = (t.equity_count || 0) > store.OVERVIEW_LIMIT;
       const pag = `<div id="tpag-${t.symbol}" style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;gap:4px">
         <button class="pg-btn" disabled>‹ Prev</button>
         <span class="pg-info">Page 1 · ${(t.equity_count||0).toLocaleString()} trades</span>
@@ -72,7 +72,7 @@ export async function loadOverview() {
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#94a3b8;cursor:pointer">
           <input type="checkbox" id="custom-include-options" checked
-                 onchange="if(customTickerState.symbol) loadCustomTickerPage(1)"
+                 onchange="if(window.customTickerState.symbol) loadCustomTickerPage(1)"
                  style="accent-color:#6366f1">
           Include options
         </label>
@@ -94,7 +94,7 @@ export async function loadTickerPage(symbol, page) {
   if (!tableDiv) return;
   tableDiv.innerHTML = '<div class="loading" style="padding:10px">Loading…</div>';
   try {
-    const params = new URLSearchParams({ ticker: symbol, category: 'equity', limit: OVERVIEW_LIMIT, page });
+    const params = new URLSearchParams({ ticker: symbol, category: 'equity', limit: store.OVERVIEW_LIMIT, page });
     const res = await fetch('/api/transactions?' + params).then(r => r.json());
     if (res.error) throw new Error(res.error);
     tableDiv.innerHTML =
@@ -115,20 +115,20 @@ export function openLadder(symbol) {
 export async function searchCustomTicker() {
   const sym = document.getElementById('custom-ticker-input').value.trim().toUpperCase();
   if (!sym) return;
-  customTickerState.symbol = sym;
+  store.customTickerState.symbol = sym;
   await loadCustomTickerPage(1);
 }
 
 export async function loadCustomTickerPage(page) {
-  const sym = customTickerState.symbol;
+  const sym = store.customTickerState.symbol;
   if (!sym) return;
-  customTickerState.page = page;
+  store.customTickerState.page = page;
 
   const includeOpts = document.getElementById('custom-include-options').checked;
   const resultDiv = document.getElementById('custom-ticker-result');
   resultDiv.innerHTML = '<div class="loading" style="padding:10px">Loading ' + esc(sym) + '…</div>';
   try {
-    const mainParams = { ticker: sym, limit: OVERVIEW_LIMIT, page };
+    const mainParams = { ticker: sym, limit: store.OVERVIEW_LIMIT, page };
     if (!includeOpts) mainParams.category = 'equity';
 
     const mainRes = await fetch('/api/transactions?' + new URLSearchParams(mainParams)).then(r => r.json());

@@ -1,5 +1,5 @@
 import { fmt, esc, fetchJson } from './utils.js';
-import * as S from './state.js';
+import { store as S } from './state.js';
 
 export async function loadOrders() {
   document.getElementById('ord-loading').style.display='block';

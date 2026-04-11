@@ -1,5 +1,5 @@
 import { fmt, fmtD, cls, esc, normalizeQty, debounce, fetchJson, formatRgLastImport } from './utils.js';
-import * as S from './state.js';
+import { store as S } from './state.js';
 
 window._paginationRegistry = S._paginationRegistry;
 

@@ -1,5 +1,5 @@
 import { fmt, fmtD, cls, esc, normalizeQty, fetchJson, ladderResultTableHtml } from './utils.js';
-import * as S from './state.js';
+import { store as S } from './state.js';
 
 export function renderRungs() {
   if (typeof window !== 'undefined') window.ladderRungs = S.ladderRungs;

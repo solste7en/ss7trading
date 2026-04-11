@@ -1,5 +1,5 @@
 import { fmt, fmtD, cls, esc, fetchJson } from './utils.js';
-import * as S from './state.js';
+import { store as S } from './state.js';
 
 export async function initWatchlists() {
   if (S.wlState.initialized) { loadQuotes(); return; }

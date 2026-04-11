@@ -1,5 +1,5 @@
 import { debounce } from './utils.js';
-import * as S from './state.js';
+import { store } from './state.js';
 
 import { switchTab, refreshCurrent } from './tabs.js';
 import {
@@ -98,9 +98,9 @@ Object.assign(window, {
 });
 
 // Expose shared state that inline handlers reference
-window._paginationRegistry = S._paginationRegistry;
-window.ladderRungs = S.ladderRungs;
-window.customTickerState = S.customTickerState;
+window._paginationRegistry = store._paginationRegistry;
+window.ladderRungs = store.ladderRungs;
+window.customTickerState = store.customTickerState;
 
 // Bootstrap
 document.getElementById('lastUpdated').textContent = 'Updated ' + new Date().toLocaleTimeString();

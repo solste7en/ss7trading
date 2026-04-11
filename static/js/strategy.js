@@ -1,6 +1,6 @@
 import { fmt, fmtD, cls, esc, fetchJson, ladderResultTableHtml, round2 } from './utils.js';
 import { normalizeQty } from './utils.js';
-import * as S from './state.js';
+import { store as S } from './state.js';
 
 export function _stratLadderEnabled() {
   const el = document.getElementById('strat-ladder-en');

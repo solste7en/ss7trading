@@ -1,82 +1,90 @@
-export let currentTab = 'positions';
+/**
+ * Single mutable app state object.
+ * ES module namespace imports are read-only; `import * as S` then `S._posData = x` throws.
+ * All shared state lives on `store` so modules can do `store._posData = x`.
+ */
+export const store = {
+  currentTab: 'positions',
 
-export const overviewState = { loaded: false };
-export const OVERVIEW_LIMIT = 10;
+  overviewState: { loaded: false },
+  OVERVIEW_LIMIT: 10,
 
-export const customTickerState = { symbol: '', page: 1, pages: 1, total: 0 };
+  customTickerState: { symbol: '', page: 1, pages: 1, total: 0 },
 
-export const POSITION_LIST_OTHER_ID = 4;
+  POSITION_LIST_OTHER_ID: 4,
 
-export let _posData = [];
-export let _posLists = [];
-export let _posAssignments = {};
-export let _posRecentMetrics = {};
-export let _posSortCol = null;
-export let _posSortDir = 1;
-export let _posExpanded = new Set();
-export let _posDndBound = false;
-export let _posVolume365 = {};
-export let _posDndPayload = null;
+  _posData: [],
+  _posLists: [],
+  _posAssignments: {},
+  _posRecentMetrics: {},
+  _posSortCol: null,
+  _posSortDir: 1,
+  _posExpanded: new Set(),
+  _posDndBound: false,
+  _posVolume365: {},
+  _posDndPayload: null,
 
-export let _posChartLong = null;
-export let _posChartShort = null;
-export let _posOthersMiniChart = null;
-export let _posOthersHideTimer = null;
-export let _posOthersPopoverListeners = false;
+  _posChartLong: null,
+  _posChartShort: null,
+  _posOthersMiniChart: null,
+  _posOthersHideTimer: null,
+  _posOthersPopoverListeners: false,
 
-export const incomePnlState = { page: 1, loaded: false };
-export const _ipExpanded = new Set();
-export let _ipCardFilter = null;
-export const _ipRecoveryCache = {};
-export let incomePnlSort = { key: 'open_date', dir: 'desc' };
+  incomePnlState: { page: 1, loaded: false },
+  _ipExpanded: new Set(),
+  _ipCardFilter: null,
+  _ipRecoveryCache: {},
+  incomePnlSort: { key: 'open_date', dir: 'desc' },
 
-export let tradeMode = 'equity';
-export let _pendingOrder = null;
-export let _tradeTicker = '';
-export let _tradeQuoteData = null;
+  tradeMode: 'equity',
+  _pendingOrder: null,
+  _tradeTicker: '',
+  _tradeQuoteData: null,
 
-export let _chainData = null;
+  _chainData: null,
 
-export let ladderRungs = [{qty:'', price:''}, {qty:'', price:''}];
-export let _ladderSubmitting = false;
+  ladderRungs: [{ qty: '', price: '' }, { qty: '', price: '' }],
+  _ladderSubmitting: false,
 
-export let _lastSuggestTicker = '';
+  _lastSuggestTicker: '',
 
-export let ladderSuggestion = undefined;
+  ladderSuggestion: undefined,
 
-export let _verifyOpen = false;
+  _verifyOpen: false,
 
-export const ladderRecentState = { page: 1, pages: 1, total: 0, eqCount: null, optCount: null };
-export const LADDER_RECENT_LIMIT = 20;
-export const LADDER_RECENT_ACTIONS = new Set([
-  'Buy','Sell','Sell Short','Buy to Cover',
-  'Buy to Open','Sell to Open','Buy to Close','Sell to Close'
-]);
+  ladderRecentState: { page: 1, pages: 1, total: 0, eqCount: null, optCount: null },
+  LADDER_RECENT_LIMIT: 20,
+  LADDER_RECENT_ACTIONS: new Set([
+    'Buy', 'Sell', 'Sell Short', 'Buy to Cover',
+    'Buy to Open', 'Sell to Open', 'Buy to Close', 'Sell to Close',
+  ]),
 
-export let _ladderOrders = [];
+  _ladderOrders: [],
 
-export let _allOrders = [];
-export let _ordSortCol = 'entered_time', _ordSortDir = -1;
-export const ordersState = { loaded: false };
+  _allOrders: [],
+  _ordSortCol: 'entered_time',
+  _ordSortDir: -1,
+  ordersState: { loaded: false },
 
-export let stratMode = 'naked';
-export let _stratTicker = '';
-export let _stratChainData = null;
-export let _stratPendingOrder = null;
-export let _stratSuggestions = [];
-export let _stratOrders = [];
+  stratMode: 'naked',
+  _stratTicker: '',
+  _stratChainData: null,
+  _stratPendingOrder: null,
+  _stratSuggestions: [],
+  _stratOrders: [],
 
-export const STRAT_MODES = ['naked', 'vertical', 'collar', 'bundle'];
+  STRAT_MODES: ['naked', 'vertical', 'collar', 'bundle'],
 
-export const CHAIN_PAGE_SIZE = 20;
-export let _chainAllStrikes = [];
-export let _chainCallMap    = {};
-export let _chainPutMap     = {};
-export let _chainPageIdx    = 0;
-export let _chainVisibleStrikes = [];
+  CHAIN_PAGE_SIZE: 20,
+  _chainAllStrikes: [],
+  _chainCallMap: {},
+  _chainPutMap: {},
+  _chainPageIdx: 0,
+  _chainVisibleStrikes: [],
 
-export const wlState = { lists: [], currentId: 'positions', initialized: false };
-export const historyState = { page:1, loaded:false };
-export const gainsState = { page:1, loaded:false };
-export const _paginationRegistry = {};
-export const stratRecentState = { page: 1 };
+  wlState: { lists: [], currentId: 'positions', initialized: false },
+  historyState: { page: 1, loaded: false },
+  gainsState: { page: 1, loaded: false },
+  _paginationRegistry: {},
+  stratRecentState: { page: 1 },
+};
