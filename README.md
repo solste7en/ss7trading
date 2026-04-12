@@ -29,7 +29,7 @@ Fill in your **App Key** and **App Secret** from the [Schwab developer portal](h
 
 ### 4. Run the one-time OAuth login
 ```bash
-python3 auth.py
+python3 -m core.auth
 ```
 
 ### 5. Start the dashboard
@@ -152,8 +152,8 @@ python3 sync_trades.py --dry-run    # preview without writing
 
 **Cron setup** (edit with `crontab -e`):
 ```cron
-*/10 9-16 * * 1-5  cd /path/to/ss7trading && source venv/bin/activate && python3 sync_trades.py
-0 9 * * 0,6        cd /path/to/ss7trading && source venv/bin/activate && python3 sync_trades.py --force
+*/10 9-16 * * 1-5  cd /path/to/schwab_app && source venv/bin/activate && python3 -m services.sync_trades
+0 9 * * 0,6        cd /path/to/schwab_app && source venv/bin/activate && python3 -m services.sync_trades --force
 ```
 
 ---
@@ -193,14 +193,14 @@ python3 sync_trades.py --dry-run    # preview without writing
 
 ## Database migrations
 
-If `sync_trades.py` or the app reports that the schema is out of date (for example missing `activity_id` on `transactions`), apply migrations once:
+If the app reports that the schema is out of date, apply migrations once:
 
 ```bash
 source venv/bin/activate
-python3 migrate_db.py
+python3 -m core.migrate_db
 ```
 
-Migrations are recorded in the `schema_migrations` table in `trades.db`.
+Migrations are idempotent — safe to re-run. They are recorded in the `schema_migrations` table in `trades.db`. The migration runner also bootstraps the base `transactions` schema if it does not yet exist, so this is also the correct command to run on a fresh database.
 
 ---
 
@@ -270,23 +270,66 @@ The dashboard uses no JavaScript bundler: Flask serves [templates/dashboard.html
 
 ---
 
-## Files
+## Project structure
 
-| File | Purpose |
-|------|---------|
-| `app.py` | Flask app — API routes and dashboard serving |
-| `db.py` | Database access layer (transactions, gains, watchlists, income trades) |
-| `auth.py` | OAuth setup (run once for first-time login) |
-| `config.py` | Loads credentials from `.env` |
-| `sync_trades.py` | Schwab API → `trades.db` sync script |
-| `scripts/verify_realized_gl_coverage.py` | Optional audit: `realized_gains` vs API / `transactions` |
-| `migrate_db.py` | Versioned SQLite schema migrations for `trades.db` |
-| `income_sync.py` | Income trade sync: FIFO matching, strategy grouping, P&L calculation |
-| `recovery.py` | Assignment recovery tracking (LIFO equity matching) |
-| `pytest.ini` | Pytest configuration |
-| `tests/` | Unit tests and performance benchmarks |
-| `templates/dashboard.html` | Dashboard HTML template |
-| `static/css/style.css` | Dashboard styles (`:root` design tokens + component rules) |
-| `static/js/dashboard.js` | Dashboard client-side logic (globals; `fetchJson`, ladder table helper) |
-| `requirements.txt` | Python dependencies |
-| `../trades.db` | SQLite database (transactions, realized G/L, income trades) |
+```
+schwab_app/
+├── app.py                  # Flask entry point — registers all blueprints
+├── requirements.txt        # Python dependencies
+├── pyproject.toml          # Ruff + coverage config
+├── pytest.ini              # Test config
+│
+├── core/                   # Infrastructure layer
+│   ├── auth.py             # Schwab OAuth (run once: python -m core.auth)
+│   ├── config.py           # Loads credentials from .env; defines DB_PATH
+│   ├── db.py               # SQLite access layer (all query functions)
+│   └── migrate_db.py       # Versioned schema migrations (python -m core.migrate_db)
+│
+├── services/               # Business logic layer
+│   ├── accounts.py         # Account balance formatting
+│   ├── analytics.py        # Performance series, exposure, concentration, consolidation scoring
+│   ├── income_sync.py      # Option income sync: FIFO matching, strategy grouping, P&L
+│   ├── options.py          # Option strategy suggestions, ladder, underwater strategies
+│   ├── orders.py           # Order building helpers
+│   ├── peers.py            # yfinance peer data with SQLite cache
+│   ├── positions.py        # Position cleaning and list management
+│   ├── quotes.py           # Quote formatting
+│   ├── recovery.py         # Assignment recovery tracking (LIFO equity matching)
+│   ├── schwab_client.py    # Schwab API client helpers
+│   └── sync_trades.py      # Schwab API → trades.db sync
+│
+├── blueprints/             # Flask route handlers (one file per feature area)
+│   ├── analytics.py        # /api/analytics/…
+│   ├── balance.py          # /api/account-balances/…
+│   ├── income.py           # /api/income/…
+│   ├── options.py          # /api/option-*/…
+│   ├── orders.py           # /api/order/…
+│   ├── positions.py        # /api/positions, /api/position-lists
+│   ├── quotes.py           # /api/quote/…, /api/quotes/…
+│   ├── sync.py             # /api/trades/sync, /api/trades/last-sync
+│   ├── transactions.py     # /api/transactions, /api/realized_gains, /api/top-tickers
+│   └── watchlists.py       # /api/watchlists/…
+│
+├── templates/
+│   └── dashboard.html      # Single-page dashboard template
+│
+├── static/
+│   ├── css/style.css       # Dark theme (CSS custom properties + component rules)
+│   └── js/                 # ES modules (analytics.js, overview.js, main.js, …)
+│
+├── tests/                  # pytest suite (~195 tests)
+│   ├── conftest.py
+│   ├── test_analytics.py
+│   ├── test_app_helpers.py
+│   ├── test_benchmarks.py
+│   ├── test_db.py
+│   ├── test_income_sync.py
+│   ├── test_recovery.py
+│   ├── test_routes.py
+│   └── test_sync_trades.py
+│
+└── scripts/
+    └── verify_realized_gl_coverage.py   # Audit realized_gains vs API
+
+../trades.db                # SQLite database — one level above project root
+```

@@ -4,7 +4,7 @@ All notable changes to ss7trading are documented here.
 
 ---
 
-## [0.3.0] — 2026-04-11
+## [0.3.0] — 2026-04-12
 
 Major feature release: **Analytics** and **Consolidation Intelligence** tabs. Portfolio-level performance tracking, sector exposure analysis, and an intelligent consolidation engine for overlapping/underwater positions with peer comparison, ETF alternatives, tax-loss harvesting, and options strategy suggestions.
 
@@ -53,7 +53,20 @@ Consolidation intelligence engine for managing overlapping and underwater positi
 ### Testing
 
 - **`tests/test_analytics.py`** — 33 new tests covering all analytics service functions (performance series, exposure, concentration, overlap groups, consolidation scoring, tax-loss swaps, underwater strategies) plus 5 route smoke tests for new API endpoints
-- Full suite: **196 tests passing**, all linting clean
+- Removed `tests/test_strategy_ladder.py` — 2 tests were word-for-word duplicates of `TestOrdersBlueprint` in `test_routes.py`
+- Full suite: **195 tests passing**, all linting clean
+
+### Refactor: project structure reorganisation
+
+Cleaned up the root directory by grouping the flat collection of Python modules into purpose-built packages.
+
+- **`core/`** (new package) — infrastructure layer: `auth.py`, `config.py`, `db.py`, `migrate_db.py`
+- **`services/`** (extended) — business logic: `sync_trades.py`, `income_sync.py`, `recovery.py` moved here from root
+- `app.py` stays at the project root as the Flask entry point
+- All import paths updated across blueprints, services, tests, and scripts (`from db import` → `from core.db import`, etc.)
+- `pyproject.toml` updated: `known-first-party` now includes `core`; `per-file-ignores` paths corrected
+- `core/config.py` uses `Path(__file__).resolve().parent.parent` to anchor all paths to the project root regardless of working directory; `DB_PATH` correctly resolves one level above the project root (`../trades.db`)
+- `core/migrate_db.py` improved: bootstraps the `transactions` base schema on first run, and handles idempotent `ALTER TABLE` migrations gracefully (skips "duplicate column" errors when the base schema already includes the column)
 
 ---
 
