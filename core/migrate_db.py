@@ -77,14 +77,15 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
 # ── internal helpers ──────────────────────────────────────────────────────────
 
 def _connect() -> sqlite3.Connection:
-    if not DB_PATH.exists():
-        sys.exit(
-            f"ERROR: Database not found at {DB_PATH}\n"
-            "Make sure trades.db exists before running migrations."
-        )
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
+
+
+def _ensure_base_schema(conn: sqlite3.Connection) -> None:
+    """Create the transactions table + indexes if they don't exist yet."""
+    conn.executescript(TRANSACTIONS_SCHEMA)
+    conn.commit()
 
 
 def _ensure_migrations_table(conn: sqlite3.Connection) -> None:
@@ -115,6 +116,7 @@ def get_pending_migrations(conn: sqlite3.Connection | None = None) -> list[tuple
     if conn is None:
         conn = _connect()
     try:
+        _ensure_base_schema(conn)
         _ensure_migrations_table(conn)
         applied = _applied_versions(conn)
         return [
@@ -136,6 +138,7 @@ def apply_migrations(conn: sqlite3.Connection | None = None, verbose: bool = Tru
     if conn is None:
         conn = _connect()
     try:
+        _ensure_base_schema(conn)
         _ensure_migrations_table(conn)
         applied = _applied_versions(conn)
         count = 0
@@ -146,7 +149,12 @@ def apply_migrations(conn: sqlite3.Connection | None = None, verbose: bool = Tru
                 print(f"  Applying migration {ver}: {desc} ...", end=" ", flush=True)
             try:
                 for sql in statements:
-                    conn.execute(sql)
+                    try:
+                        conn.execute(sql)
+                    except sqlite3.OperationalError as col_err:
+                        if "duplicate column" in str(col_err).lower():
+                            continue
+                        raise
                 conn.execute(
                     "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
                     (ver, desc),
