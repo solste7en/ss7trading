@@ -1,14 +1,25 @@
 """
 auth.py — Schwab OAuth token management
 
-First-time setup:  python auth.py
+First-time setup (from repo root):
+  python3 -m core.auth
+  or: python3 core/auth.py
   → Opens your browser to Schwab login
   → Redirects back to localhost after you approve
   → Saves token.json for all future use (auto-refreshes)
 
 Subsequent runs: just import get_client() — no browser needed.
 """
+import sys
 from pathlib import Path
+
+# Running as `python3 core/auth.py` puts only `core/` on sys.path; repo root must
+# be on the path for `from core.config import ...`. `python3 -m core.auth` does
+# not need this.
+if __package__ is None:
+    _root = Path(__file__).resolve().parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
 
 import schwab
 
@@ -24,7 +35,7 @@ def get_client():
     if not token_path.exists():
         raise FileNotFoundError(
             f"No token found at {TOKEN_PATH}. "
-            "Run  python auth.py  first to complete the one-time OAuth login."
+            "Run  python3 -m core.auth  first to complete the one-time OAuth login."
         )
     return schwab.auth.client_from_token_file(
         token_path=str(token_path),

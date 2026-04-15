@@ -40,8 +40,11 @@ def api_trades_sync():
         if pending:
             desc = "; ".join(f"[{v}] {d}" for v, d in pending)
             return jsonify({
-                "error": f"DB schema is out of date — run `python migrate_db.py` first. "
-                         f"Pending: {desc}"
+                "error": (
+                    "DB schema is out of date. From the project root (ss7trading folder) run: "
+                    "python3 -m core.migrate_db — then try sync again. "
+                    f"Pending: {desc}"
+                )
             }), 400
 
         last_synced = get_trade_sync_time()
@@ -51,7 +54,7 @@ def api_trades_sync():
             days_since = (datetime.datetime.utcnow() - last_dt).days
             lookback = min(365, max(2, days_since + 3))
         else:
-            lookback = 7
+            lookback = 30
 
         result = run_trade_sync(lookback_days=lookback, check_schema=False)
         set_trade_sync_time()

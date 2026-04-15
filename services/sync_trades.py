@@ -622,8 +622,7 @@ def _assert_schema_current() -> None:
     for ver, desc in pending:
         log.error("  [%s] %s", ver, desc)
     log.error(
-        "Run  python migrate_db.py  in the schwab_app directory to update the "
-        "schema, then re-run this script."
+        "From the project root run: python3 -m core.migrate_db, then re-run this script."
     )
     sys.exit(1)
 

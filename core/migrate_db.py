@@ -4,12 +4,12 @@ migrate_db.py — trades.db schema migration manager
 Tracks applied migrations in a `schema_migrations` table and applies any
 pending ones in version order.
 
-Usage:
-  python migrate_db.py          # apply all pending migrations (safe to re-run)
-  python migrate_db.py --check  # report pending migrations without applying
+Usage (from project root):
+  python3 -m core.migrate_db          # apply all pending migrations (safe to re-run)
+  python3 -m core.migrate_db --check  # report pending migrations without applying
 
 Import API (used by sync_trades.py):
-  from migrate_db import get_pending_migrations, apply_migrations
+  from core.migrate_db import get_pending_migrations, apply_migrations
 """
 
 import argparse
@@ -198,7 +198,7 @@ def main() -> None:
         print(f"trades.db has {len(pending)} pending migration(s):")
         for ver, desc in pending:
             print(f"  [{ver}] {desc}")
-        print("\nRun `python migrate_db.py` to apply them.")
+        print("\nRun `python3 -m core.migrate_db` (from project root) to apply them.")
         conn.close()
         sys.exit(1)
 
