@@ -798,6 +798,7 @@ tr.pos-dragging td { opacity: 0.55; }
 .ip-status-closed   { background: var(--color-green-muted-bg); color: var(--color-pos-soft); }
 .ip-status-expired  { background: var(--color-green-dark-bg); color: var(--color-pos-bright); }
 .ip-status-assigned { background: var(--color-orange-dark-bg); color: var(--color-orange-light-text); }
+.ip-status-early    { background: #7c2d12; color: #fdba74; margin-left: 4px; }
 
 /* Outcome badges */
 .ip-outcome-win     { background: var(--color-green-dark-bg); color: var(--color-pos-bright); }

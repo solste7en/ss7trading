@@ -72,15 +72,31 @@ def run_sync():
             equity_trade_lookup[key] = action_eq
     log.info("Built equity-trade lookup with %d entries", len(equity_trade_lookup))
 
-    def _is_assigned_via_equity(underlying, expiry, strike) -> bool:
-        """Check if an equity TRADE at `strike` happened within 5 days of `expiry`."""
+    def _is_assigned_via_equity(underlying, expiry, strike, event_date=None) -> bool:
+        """Check if an equity TRADE at `strike` happened near `expiry` or `event_date`.
+
+        Schwab reports early assignments as "Expired" on the actual assignment
+        date, which can be well before the contract expiry.  We check around
+        both the event date (± 2 days) *and* the expiry (through +5 days) so
+        early assignments are not missed.
+        """
+        rounded = round(float(strike), 2)
+        dates_to_check: set[str] = set()
         try:
             exp_dt = datetime.date.fromisoformat(expiry)
+            for delta in range(0, 6):
+                dates_to_check.add((exp_dt + datetime.timedelta(days=delta)).isoformat())
         except (ValueError, TypeError):
-            return False
-        for delta in range(0, 6):   # expiry day through +5 calendar days
-            chk = (exp_dt + datetime.timedelta(days=delta)).isoformat()
-            if (underlying, chk, round(float(strike), 2)) in equity_trade_lookup:
+            pass
+        if event_date and event_date != expiry:
+            try:
+                ev_dt = datetime.date.fromisoformat(event_date)
+                for delta in range(-3, 6):
+                    dates_to_check.add((ev_dt + datetime.timedelta(days=delta)).isoformat())
+            except (ValueError, TypeError):
+                pass
+        for chk in sorted(dates_to_check):
+            if (underlying, chk, rounded) in equity_trade_lookup:
                 log.info(
                     "Assignment detected for %s %s %.4g (equity trade on %s)",
                     underlying, strike, expiry, chk,
@@ -107,8 +123,9 @@ def run_sync():
             und = parsed.get("underlying")
             expiry = parsed.get("option_expiry")
             strike = parsed.get("option_strike")
+            event_date = parsed.get("trade_date")
             if und and expiry and strike is not None:
-                if _is_assigned_via_equity(und, expiry, strike):
+                if _is_assigned_via_equity(und, expiry, strike, event_date=event_date):
                     parsed = dict(parsed)   # copy so we don't mutate the original
                     parsed["action"] = "Assigned"
         option_rows.append(parsed)
@@ -351,6 +368,15 @@ def _group_into_trades(matched_legs):
 
             dedup = _make_dedup_key(underlying, open_date, trade_legs)
 
+            # Early assignment: the contract was assigned before its expiry date.
+            is_early = 0
+            if status == "assigned" and close_date:
+                for leg in trade_legs:
+                    exp = leg.get("expiry")
+                    if exp and close_date < exp:
+                        is_early = 1
+                        break
+
             trade = {
                 "underlying": underlying,
                 "strategy": strategy,
@@ -359,6 +385,7 @@ def _group_into_trades(matched_legs):
                 "status": status,
                 "days_held": days_held,
                 "fees": round(total_fees, 2),
+                "is_early_assignment": is_early,
                 "dedup_key": dedup,
                 "_legs": [{
                     "leg_type": l["leg_type"],

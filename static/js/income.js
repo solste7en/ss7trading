@@ -195,7 +195,7 @@ export function _renderIncomeTrades(trades) {
     }).join(' / ');
 
     const stratBadge = _ipStratBadge(t.strategy);
-    const statusBadge = _ipStatusBadge(t.status);
+    const statusBadge = _ipStatusBadge(t);
     const outcomeBadge = _ipOutcomeBadge(t);
 
     const pnl = t.net_pnl != null ? t.net_pnl : null;
@@ -317,14 +317,19 @@ export function _ipStratBadge(strategy) {
   return `<span class="ip-badge ${cls}">${label}</span>`;
 }
 
-export function _ipStatusBadge(status) {
+export function _ipStatusBadge(trade) {
+  const status = typeof trade === 'string' ? trade : (trade.status || '');
   const map = {
     open: 'ip-status-open',
     closed: 'ip-status-closed',
     expired: 'ip-status-expired',
     assigned: 'ip-status-assigned',
   };
-  return `<span class="ip-badge ${map[status] || ''}">${status}</span>`;
+  let html = `<span class="ip-badge ${map[status] || ''}">${status}</span>`;
+  if (status === 'assigned' && trade && trade.is_early_assignment) {
+    html += `<span class="ip-badge ip-status-early">early</span>`;
+  }
+  return html;
 }
 
 export function _ipOutcomeBadge(t) {

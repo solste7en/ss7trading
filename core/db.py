@@ -1026,6 +1026,7 @@ def _ensure_income_tables(conn):
             is_win                INTEGER DEFAULT 0,
             is_perfect_win        INTEGER DEFAULT 0,
             assignment_stock_price REAL,
+            is_early_assignment   INTEGER DEFAULT 0,
             recovery_dismissed_qty INTEGER DEFAULT 0,
             dedup_key             TEXT    UNIQUE,
             synced_at             TEXT    DEFAULT (datetime('now'))
@@ -1064,6 +1065,11 @@ def _ensure_income_tables(conn):
         conn.execute("SELECT recovery_dismissed_qty FROM income_trades LIMIT 1")
     except Exception:
         conn.execute("ALTER TABLE income_trades ADD COLUMN recovery_dismissed_qty INTEGER DEFAULT 0")
+    # Migrate: add is_early_assignment if missing
+    try:
+        conn.execute("SELECT is_early_assignment FROM income_trades LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE income_trades ADD COLUMN is_early_assignment INTEGER DEFAULT 0")
     conn.commit()
 
 
@@ -1092,7 +1098,8 @@ def upsert_income_trade(trade, legs):
                     underlying=?, strategy=?, open_date=?, close_date=?,
                     status=?, days_held=?, net_premium=?, close_cost=?, fees=?,
                     net_pnl=?, net_pnl_pct=?, is_win=?, is_perfect_win=?,
-                    assignment_stock_price=?, synced_at=datetime('now')
+                    assignment_stock_price=?, is_early_assignment=?,
+                    synced_at=datetime('now')
                 WHERE id=?
             """, (trade["underlying"], trade["strategy"], trade["open_date"],
                   trade.get("close_date"), trade["status"], trade.get("days_held"),
@@ -1100,21 +1107,24 @@ def upsert_income_trade(trade, legs):
                   trade.get("fees", 0), trade.get("net_pnl"),
                   trade.get("net_pnl_pct"), trade.get("is_win", 0),
                   trade.get("is_perfect_win", 0),
-                  trade.get("assignment_stock_price"), trade_id))
+                  trade.get("assignment_stock_price"),
+                  trade.get("is_early_assignment", 0), trade_id))
         else:
             cur.execute("""
                 INSERT INTO income_trades
                     (underlying, strategy, open_date, close_date, status, days_held,
                      net_premium, close_cost, fees, net_pnl, net_pnl_pct,
-                     is_win, is_perfect_win, assignment_stock_price, dedup_key)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     is_win, is_perfect_win, assignment_stock_price,
+                     is_early_assignment, dedup_key)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (trade["underlying"], trade["strategy"], trade["open_date"],
                   trade.get("close_date"), trade["status"], trade.get("days_held"),
                   trade.get("net_premium"), trade.get("close_cost", 0),
                   trade.get("fees", 0), trade.get("net_pnl"),
                   trade.get("net_pnl_pct"), trade.get("is_win", 0),
                   trade.get("is_perfect_win", 0),
-                  trade.get("assignment_stock_price"), trade["dedup_key"]))
+                  trade.get("assignment_stock_price"),
+                  trade.get("is_early_assignment", 0), trade["dedup_key"]))
             trade_id = cur.lastrowid
 
         for leg in legs:
