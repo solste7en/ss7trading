@@ -74,6 +74,32 @@ export function _getRecoveryForTrade(ticker, tradeId) {
   return (cached.assignments || []).find(a => a.trade_id === tradeId) || null;
 }
 
+function _ipAppendDateRangeParams(params) {
+  const rangeEl = document.getElementById('ip-date-range');
+  const range = (rangeEl && rangeEl.value) || 'all';
+  params.set('range', range);
+  if (range === 'custom') {
+    const df = document.getElementById('ip-custom-from')?.value;
+    const dte = document.getElementById('ip-custom-to')?.value;
+    if (df) params.set('date_from', df);
+    if (dte) params.set('date_to', dte);
+  }
+}
+
+export function onIpDateRangeChange() {
+  const range = document.getElementById('ip-date-range')?.value || 'all';
+  const wrap = document.getElementById('ip-custom-date-wrap');
+  if (wrap) wrap.style.display = range === 'custom' ? 'inline-flex' : 'none';
+  loadIncomeStats();
+  loadIncomeTrades();
+}
+
+export function onIpCustomDateChange() {
+  if (document.getElementById('ip-date-range')?.value !== 'custom') return;
+  loadIncomeStats();
+  loadIncomeTrades();
+}
+
 export function _ipOnStatusChange() {
   S._ipCardFilter = null;
   document.querySelectorAll('.ip-kpi-clickable').forEach(e => e.classList.remove('active'));
@@ -113,6 +139,7 @@ export async function loadIncomeStats() {
     if (status) params.set('status', status);
     if (strategy) params.set('strategy', strategy);
     if (S._ipCardFilter) params.set('outcome', S._ipCardFilter);
+    _ipAppendDateRangeParams(params);
     const data = await fetch('/api/income/stats?' + params).then(r => r.json());
     if (data.error) throw new Error(data.error);
 
@@ -121,10 +148,15 @@ export async function loadIncomeStats() {
     pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
     pnlEl.className = 'ip-kpi-value ' + (pnl >= 0 ? 'pos' : 'neg');
 
-    const rpnl = data.total_recovery_pnl != null ? data.total_recovery_pnl : 0;
+    const rpnl = data.total_true_recovery_pnl != null ? data.total_true_recovery_pnl : 0;
     const rEl = document.getElementById('ip-kpi-recovery-pnl');
     rEl.textContent = (rpnl >= 0 ? '+' : '') + '$' + rpnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
     rEl.className = 'ip-kpi-value ' + (rpnl >= 0 ? 'pos' : 'neg');
+
+    const sumPnl = pnl + rpnl;
+    const sumEl = document.getElementById('ip-kpi-sum-pnl');
+    sumEl.textContent = (sumPnl >= 0 ? '+' : '') + '$' + sumPnl.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    sumEl.className = 'ip-kpi-value ' + (sumPnl >= 0 ? 'pos' : 'neg');
 
     document.getElementById('ip-kpi-winrate').textContent = (data.win_rate || 0) + '%';
     document.getElementById('ip-kpi-perfect').textContent = (data.perfect_win_rate || 0) + '%';
@@ -160,6 +192,7 @@ export async function loadIncomeTrades(resetPage = true) {
       sort_by: S.incomePnlSort.key, sort_dir: S.incomePnlSort.dir
     });
     if (S._ipCardFilter) params.set('outcome', S._ipCardFilter);
+    _ipAppendDateRangeParams(params);
     const res = await fetch('/api/income/trades?' + params).then(r => r.json());
     if (res.error) throw new Error(res.error);
 
@@ -215,9 +248,10 @@ export function _renderIncomeTrades(trades) {
     let recPnlCell = '—';
     if (t.status === 'assigned' && t.recovery_target != null && t.recovery_target > 0) {
       recCell = (t.recovery_recovered != null ? t.recovery_recovered : 0) + '/' + t.recovery_target;
-      if (t.recovery_pnl != null) {
-        const rc = t.recovery_pnl >= 0 ? 'pos' : 'neg';
-        recPnlCell = `<span class="${rc}">` + (t.recovery_pnl >= 0 ? '+' : '') + '$' + t.recovery_pnl.toFixed(2) + '</span>';
+      const trp = t.true_recovery_pnl;
+      if (trp != null) {
+        const rc = trp >= 0 ? 'pos' : 'neg';
+        recPnlCell = `<span class="${rc}">` + (trp >= 0 ? '+' : '') + '$' + trp.toFixed(2) + '</span>';
       }
     }
 
@@ -261,8 +295,13 @@ export function _renderIncomeTrades(trades) {
           <td colspan="4"></td>
         </tr>`;
       }
-      // Recovery section for assigned trades
-      if (t.status === 'assigned') {
+      // Recovery section for assigned trades (skipped for fully-exercised
+      // spreads — both legs exercised/assigned nets out on the stock side).
+      if (t.status === 'assigned' && t.is_fully_exercised) {
+        html += `<tr class="ip-recovery-header"><td></td>
+          <td colspan="15" style="padding:8px 24px;color:#64748b;font-size:11px;font-style:italic">
+            Both legs exercised at expiry — stock position netted out, no recovery needed.</td></tr>`;
+      } else if (t.status === 'assigned') {
         const rec = _getRecoveryForTrade(t.underlying, t.id);
         if (rec) {
           html += _renderRecoverySection(rec, t.underlying);
@@ -330,6 +369,9 @@ export function _ipStatusBadge(trade) {
   if (status === 'assigned' && trade && trade.is_early_assignment) {
     html += `<span class="ip-badge ip-status-early">early</span>`;
   }
+  if (status === 'assigned' && trade && trade.is_fully_exercised) {
+    html += `<span class="ip-badge ip-status-exercised" title="Both legs exercised at expiry — stock position netted out, no recovery needed">exercised</span>`;
+  }
   return html;
 }
 
@@ -350,6 +392,9 @@ export function _renderRecoverySection(rec, ticker) {
   const pnl = rec.recovery_pnl || 0;
   const pnlClass = pnl >= 0 ? 'pos' : 'neg';
   const pnlStr = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+  const truePnl = rec.true_recovery_pnl || 0;
+  const truePnlClass = truePnl >= 0 ? 'pos' : 'neg';
+  const truePnlStr = (truePnl >= 0 ? '+' : '') + '$' + truePnl.toFixed(2);
   const isComplete = rec.is_complete;
   const trades = rec.recovery_trades || [];
 
@@ -368,6 +413,8 @@ export function _renderRecoverySection(rec, ticker) {
         <span class="ip-recovery-progress-text">${recovered} / ${effectiveTarget} shares (${pct}%)</span>
         ${dismissedLabel}
         <span class="ip-recovery-pnl ${pnlClass}">${pnlStr}</span>
+        <span style="color:#64748b;font-size:11px">/</span>
+        <span class="ip-recovery-pnl ${truePnlClass}" title="True P&L vs assignment price">${truePnlStr}</span>
         ${statusLabel}
         ${!isComplete && remaining > 0 ? `<button class="ip-recovery-closeout" onclick="event.stopPropagation(); dismissRecovery(${rec.trade_id},'${esc(ticker)}',${remaining + dismissed})">Close Out</button>` : ''}
       </div>
@@ -376,19 +423,24 @@ export function _renderRecoverySection(rec, ticker) {
 
   // Individual recovery trades
   for (const rt of trades) {
-    const rtPnlClass = rt.pnl >= 0 ? 'pos' : 'neg';
-    const rtPnlStr = (rt.pnl >= 0 ? '+' : '') + '$' + rt.pnl.toFixed(2);
+    const pps = rt.pnl_per_share != null ? rt.pnl_per_share : 0;
+    const perShClass = pps >= 0 ? 'pos' : 'neg';
+    const perShStr = (pps >= 0 ? '+' : '') + '$' + pps.toFixed(2) + '/sh';
+    const rp = rt.pnl != null ? rt.pnl : 0;
+    const rtPnlClass = rp >= 0 ? 'pos' : 'neg';
+    const rtPnlStr = (rp >= 0 ? '+' : '') + '$' + rp.toFixed(2);
+    const tp = rt.true_pnl != null ? rt.true_pnl : 0;
+    const rtTruePnlClass = tp >= 0 ? 'pos' : 'neg';
+    const rtTruePnlStr = (tp >= 0 ? '+' : '') + '$' + tp.toFixed(2);
     html += `<tr class="ip-recovery-row"><td></td>
       <td colspan="2" style="padding-left:36px;font-size:11px;color:#94a3b8">
         ${esc(rt.action)} ${rt.qty} shares @ $${rt.price.toFixed(2)}
       </td>
-      <td style="font-size:11px;color:#64748b">vs strike $${_ipFormatStrike(rec.strike)}</td>
-      <td></td><td></td>
+      <td style="font-size:11px;color:#64748b">vs strike $${_ipFormatStrike(rec.strike)} <span class="${perShClass}" style="margin-left:6px;font-size:11px">${perShStr}</span></td>
+      <td></td>
+      <td style="font-size:11px"><span class="${rtPnlClass}">${rtPnlStr}</span><span style="color:#64748b"> / </span><span class="${rtTruePnlClass}">${rtTruePnlStr}</span></td>
       <td style="font-size:11px">${rt.date}</td>
-      <td colspan="4"></td>
-      <td class="${rtPnlClass}" style="font-size:11px">${rtPnlStr}</td>
-      <td style="font-size:11px;color:#64748b">${rt.pnl_per_share >= 0 ? '+' : ''}$${rt.pnl_per_share.toFixed(2)}/sh</td>
-      <td colspan="3"></td>
+      <td colspan="8"></td>
     </tr>`;
   }
 

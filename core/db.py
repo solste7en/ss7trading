@@ -1027,6 +1027,7 @@ def _ensure_income_tables(conn):
             is_perfect_win        INTEGER DEFAULT 0,
             assignment_stock_price REAL,
             is_early_assignment   INTEGER DEFAULT 0,
+            is_fully_exercised    INTEGER DEFAULT 0,
             recovery_dismissed_qty INTEGER DEFAULT 0,
             dedup_key             TEXT    UNIQUE,
             synced_at             TEXT    DEFAULT (datetime('now'))
@@ -1070,6 +1071,12 @@ def _ensure_income_tables(conn):
         conn.execute("SELECT is_early_assignment FROM income_trades LIMIT 1")
     except Exception:
         conn.execute("ALTER TABLE income_trades ADD COLUMN is_early_assignment INTEGER DEFAULT 0")
+    # Migrate: add is_fully_exercised if missing (spread where short was assigned
+    # and long was exercised same day → net-zero stock, no recovery needed).
+    try:
+        conn.execute("SELECT is_fully_exercised FROM income_trades LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE income_trades ADD COLUMN is_fully_exercised INTEGER DEFAULT 0")
     conn.commit()
 
 
@@ -1099,6 +1106,7 @@ def upsert_income_trade(trade, legs):
                     status=?, days_held=?, net_premium=?, close_cost=?, fees=?,
                     net_pnl=?, net_pnl_pct=?, is_win=?, is_perfect_win=?,
                     assignment_stock_price=?, is_early_assignment=?,
+                    is_fully_exercised=?,
                     synced_at=datetime('now')
                 WHERE id=?
             """, (trade["underlying"], trade["strategy"], trade["open_date"],
@@ -1108,15 +1116,16 @@ def upsert_income_trade(trade, legs):
                   trade.get("net_pnl_pct"), trade.get("is_win", 0),
                   trade.get("is_perfect_win", 0),
                   trade.get("assignment_stock_price"),
-                  trade.get("is_early_assignment", 0), trade_id))
+                  trade.get("is_early_assignment", 0),
+                  trade.get("is_fully_exercised", 0), trade_id))
         else:
             cur.execute("""
                 INSERT INTO income_trades
                     (underlying, strategy, open_date, close_date, status, days_held,
                      net_premium, close_cost, fees, net_pnl, net_pnl_pct,
                      is_win, is_perfect_win, assignment_stock_price,
-                     is_early_assignment, dedup_key)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     is_early_assignment, is_fully_exercised, dedup_key)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (trade["underlying"], trade["strategy"], trade["open_date"],
                   trade.get("close_date"), trade["status"], trade.get("days_held"),
                   trade.get("net_premium"), trade.get("close_cost", 0),
@@ -1124,7 +1133,8 @@ def upsert_income_trade(trade, legs):
                   trade.get("net_pnl_pct"), trade.get("is_win", 0),
                   trade.get("is_perfect_win", 0),
                   trade.get("assignment_stock_price"),
-                  trade.get("is_early_assignment", 0), trade["dedup_key"]))
+                  trade.get("is_early_assignment", 0),
+                  trade.get("is_fully_exercised", 0), trade["dedup_key"]))
             trade_id = cur.lastrowid
 
         for leg in legs:
@@ -1218,7 +1228,15 @@ def get_most_traded_ticker() -> str | None:
         return row["underlying"] if row else None
 
 
-def _income_trades_where(ticker="", status="", strategy="", outcome="", table_alias="t"):
+def _income_trades_where(
+    ticker="",
+    status="",
+    strategy="",
+    outcome="",
+    table_alias="t",
+    date_from="",
+    date_to="",
+):
     """Build WHERE fragments for income_trades filters. Returns (list of SQL fragments, params)."""
     p = f"{table_alias}." if table_alias else ""
     where, params = [], []
@@ -1239,12 +1257,21 @@ def _income_trades_where(ticker="", status="", strategy="", outcome="", table_al
     elif outcome == "closed":
         # Must match get_income_stats closed_trades: SUM(status != 'open'), not status='closed' only.
         where.append(f"{p}status != 'open'")
+    df = (date_from or "").strip()
+    dt_ = (date_to or "").strip()
+    if df or dt_:
+        eff = f"COALESCE(NULLIF(TRIM({p}close_date), ''), {p}open_date)"
+        where.append(f"{eff} >= ? AND {eff} <= ?")
+        params.append(df or "1970-01-01")
+        params.append(dt_ or "9999-12-31")
     return where, params
 
 
-def get_income_trade_ids_filtered(ticker="", status="", strategy="", outcome=""):
+def get_income_trade_ids_filtered(
+    ticker="", status="", strategy="", outcome="", date_from="", date_to=""
+):
     """Return list of {id, underlying} dicts for income_trades matching the given filters."""
-    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "")
+    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "", date_from, date_to)
     clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
     with _connection() as conn:
         _ensure_income_tables(conn)
@@ -1308,10 +1335,20 @@ def _income_efficiency_score(trade: dict) -> float | None:
     return (float(net) / math.sqrt(d + 1)) * (100.0 / strike)
 
 
-def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outcome="",
-                      sort_by="open_date", sort_dir="desc"):
+def get_income_trades(
+    page=1,
+    limit=25,
+    ticker="",
+    status="",
+    strategy="",
+    outcome="",
+    sort_by="open_date",
+    sort_dir="desc",
+    date_from="",
+    date_to="",
+):
     offset = (page - 1) * limit
-    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "t")
+    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "t", date_from, date_to)
     clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
     sb = (sort_by or "open_date").lower()
     rev = (sort_dir or "desc").lower() != "asc"
@@ -1352,7 +1389,7 @@ def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outco
                 trades.sort(key=_rec_frac, reverse=rev)
             else:
                 def _pnl_key(t):
-                    v = t.get("recovery_pnl")
+                    v = t.get("true_recovery_pnl")
                     if v is None:
                         return float("-inf") if rev else float("inf")
                     return v
@@ -1391,8 +1428,8 @@ def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outco
     }
 
 
-def get_income_stats(ticker="", status="", strategy="", outcome=""):
-    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "")
+def get_income_stats(ticker="", status="", strategy="", outcome="", date_from="", date_to=""):
+    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "", date_from, date_to)
     clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
 
     with _connection() as conn:

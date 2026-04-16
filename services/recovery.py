@@ -35,6 +35,10 @@ def compute_recovery(ticker: str) -> dict:
     call_assignments = []
 
     for t in trades:
+        # Fully-exercised spreads: short assigned + long exercised nets out on
+        # the stock side, so there is nothing to recover. Skip them entirely.
+        if t.get("is_fully_exercised"):
+            continue
         legs = t.get("legs", [])
         short_leg = next((l for l in legs if l["direction"] == "short"), None)
         if not short_leg:
@@ -50,6 +54,7 @@ def compute_recovery(ticker: str) -> dict:
             "strike": strike,
             "option_type": option_type,
             "assignment_date": t["close_date"],
+            "assignment_stock_price": t.get("assignment_stock_price"),
             "assigned_qty": assigned_qty,
             "dismissed_qty": t.get("recovery_dismissed_qty") or 0,
             "recovery_trades": [],
@@ -110,11 +115,14 @@ def _match_recovery(ticker, assignments, actions, direction):
 
             fill = min(a["_remaining"], remaining_to_fill)
             strike = a["strike"]
+            asgn_price = a.get("assignment_stock_price")
 
             if direction == "put":
                 pnl_per_share = price - strike
+                true_pnl_per_share = (price - asgn_price) if asgn_price is not None else pnl_per_share
             else:
                 pnl_per_share = strike - price
+                true_pnl_per_share = (asgn_price - price) if asgn_price is not None else pnl_per_share
 
             a["recovery_trades"].append({
                 "date": trade_date,
@@ -123,6 +131,8 @@ def _match_recovery(ticker, assignments, actions, direction):
                 "price": round(price, 4),
                 "pnl_per_share": round(pnl_per_share, 4),
                 "pnl": round(pnl_per_share * fill, 2),
+                "true_pnl_per_share": round(true_pnl_per_share, 4),
+                "true_pnl": round(true_pnl_per_share * fill, 2),
             })
             a["_remaining"] -= fill
             a["recovered_qty"] += fill
@@ -136,39 +146,52 @@ def _match_recovery(ticker, assignments, actions, direction):
         effective_target = a["assigned_qty"] - a["dismissed_qty"]
         a["remaining_qty"] = max(0, effective_target - a["recovered_qty"])
         a["recovery_pnl"] = round(sum(rt["pnl"] for rt in a["recovery_trades"]), 2)
+        a["true_recovery_pnl"] = round(sum(rt["true_pnl"] for rt in a["recovery_trades"]), 2)
         a["is_complete"] = a["recovered_qty"] >= effective_target
         del a["_remaining"]
 
     return assignments
 
 
-def sum_recovery_pnl_filtered(ticker="", status="", strategy="", outcome=""):
-    """Sum recovery P&L for assigned income trades matching the same filters as the trades table."""
-    rows = get_income_trade_ids_filtered(ticker, status, strategy, outcome)
+def sum_recovery_pnl_filtered(
+    ticker="", status="", strategy="", outcome="", date_from="", date_to=""
+):
+    """Sum recovery P&L (vs strike) and true recovery P&L (vs assignment price)
+    for assigned income trades matching the given filters.
+
+    Returns ``{"recovery_pnl": float, "true_recovery_pnl": float}``.
+    """
+    rows = get_income_trade_ids_filtered(ticker, status, strategy, outcome, date_from, date_to)
     if not rows:
-        return 0.0
+        return {"recovery_pnl": 0.0, "true_recovery_pnl": 0.0}
     by_under = {}
     for r in rows:
         if r["underlying"]:
             by_under.setdefault(r["underlying"].upper(), []).append(r["id"])
-    total = 0.0
+    total_rec = 0.0
+    total_true = 0.0
     for und, tids in by_under.items():
         data = compute_recovery(und)
         tid_set = set(tids)
         for a in data.get("assignments", []):
             if a["trade_id"] in tid_set:
-                total += a.get("recovery_pnl") or 0
-    return round(total, 2)
+                total_rec += a.get("recovery_pnl") or 0
+                total_true += a.get("true_recovery_pnl") or 0
+    return {"recovery_pnl": round(total_rec, 2), "true_recovery_pnl": round(total_true, 2)}
 
 
 def attach_recovery_summaries(trades: list) -> None:
     """Mutate trade dicts in place with recovery_recovered, recovery_target, recovery_pnl for assigned rows."""
-    assigned = [t for t in trades if t.get("status") == "assigned"]
+    assigned = [
+        t for t in trades
+        if t.get("status") == "assigned" and not t.get("is_fully_exercised")
+    ]
     if not assigned:
         for t in trades:
             t.setdefault("recovery_recovered", None)
             t.setdefault("recovery_target", None)
             t.setdefault("recovery_pnl", None)
+            t.setdefault("true_recovery_pnl", None)
         return
     by_under = {}
     for t in assigned:
@@ -184,19 +207,22 @@ def attach_recovery_summaries(trades: list) -> None:
             if a["trade_id"] in tids:
                 tid_to_a[a["trade_id"]] = a
     for t in trades:
-        if t.get("status") != "assigned":
+        if t.get("status") != "assigned" or t.get("is_fully_exercised"):
             t["recovery_recovered"] = None
             t["recovery_target"] = None
             t["recovery_pnl"] = None
+            t["true_recovery_pnl"] = None
             continue
         a = tid_to_a.get(t["id"])
         if not a:
             t["recovery_recovered"] = None
             t["recovery_target"] = None
             t["recovery_pnl"] = None
+            t["true_recovery_pnl"] = None
             continue
         eff = int(a["assigned_qty"]) - int(a.get("dismissed_qty") or 0)
         rec = int(round(a["recovered_qty"]))
         t["recovery_recovered"] = rec
         t["recovery_target"] = eff
         t["recovery_pnl"] = a["recovery_pnl"]
+        t["true_recovery_pnl"] = a["true_recovery_pnl"]

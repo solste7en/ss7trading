@@ -718,6 +718,13 @@ tr.pos-dragging td { opacity: 0.55; }
   flex-wrap: wrap; gap: 10px; margin-bottom: 16px;
 }
 .ip-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ip-custom-date-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.ip-custom-date-sep { color: var(--color-gray-600); font-size: 12px; }
+.ip-filters .ip-custom-range {
+  width: auto;
+  min-width: 118px;
+  text-transform: none;
+}
 .ip-filters input, .ip-filters select {
   background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px;
   color: var(--color-text); padding: 7px 10px; font-size: 12px; outline: none;
@@ -799,6 +806,7 @@ tr.pos-dragging td { opacity: 0.55; }
 .ip-status-expired  { background: var(--color-green-dark-bg); color: var(--color-pos-bright); }
 .ip-status-assigned { background: var(--color-orange-dark-bg); color: var(--color-orange-light-text); }
 .ip-status-early    { background: #7c2d12; color: #fdba74; margin-left: 4px; }
+.ip-status-exercised { background: #1e3a8a; color: #bfdbfe; margin-left: 4px; }
 
 /* Outcome badges */
 .ip-outcome-win     { background: var(--color-green-dark-bg); color: var(--color-pos-bright); }

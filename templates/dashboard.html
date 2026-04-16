@@ -233,6 +233,24 @@
         <option value="spread">Spreads</option>
         <option value="collar">Collar</option>
       </select>
+      <select id="ip-date-range" title="Filter by close date (closed/assigned) or open date (still open)" onchange="onIpDateRangeChange()">
+        <option value="all">All dates</option>
+        <option value="last_7_days">Last 7 days</option>
+        <option value="last_30_days">Last 30 days</option>
+        <option value="last_90_days">Last 90 days</option>
+        <option value="last_365_days">Last 365 days</option>
+        <option value="mtd">Month to date</option>
+        <option value="prev_month">Previous month</option>
+        <option value="last_6_months">Last 6 months</option>
+        <option value="ytd">Year to date</option>
+        <option value="last_year">Last calendar year</option>
+        <option value="custom">Custom range…</option>
+      </select>
+      <span id="ip-custom-date-wrap" class="ip-custom-date-wrap" style="display:none">
+        <input type="date" id="ip-custom-from" class="ip-custom-range" onchange="onIpCustomDateChange()">
+        <span class="ip-custom-date-sep">–</span>
+        <input type="date" id="ip-custom-to" class="ip-custom-range" onchange="onIpCustomDateChange()">
+      </span>
       <select id="ip-limit" onchange="loadIncomeTrades()">
         <option value="25">25 / page</option>
         <option value="50">50 / page</option>
@@ -250,12 +268,16 @@
   <!-- KPI cards -->
   <div class="ip-kpi-row" id="ip-kpi-row">
     <div class="ip-kpi-card">
-      <div class="ip-kpi-label">Total Net P&amp;L</div>
+      <div class="ip-kpi-label">Option Net P&amp;L</div>
       <div class="ip-kpi-value" id="ip-kpi-pnl">—</div>
     </div>
     <div class="ip-kpi-card">
       <div class="ip-kpi-label">Recovery Net P&amp;L</div>
       <div class="ip-kpi-value" id="ip-kpi-recovery-pnl">—</div>
+    </div>
+    <div class="ip-kpi-card">
+      <div class="ip-kpi-label">Sum Net P&amp;L</div>
+      <div class="ip-kpi-value" id="ip-kpi-sum-pnl">—</div>
     </div>
     <div class="ip-kpi-card ip-kpi-clickable" id="ip-kpi-card-win" onclick="setIpCardFilter('win')">
       <div class="ip-kpi-label">Win Rate</div>

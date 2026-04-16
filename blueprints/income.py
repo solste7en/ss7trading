@@ -6,6 +6,7 @@ import threading
 from flask import Blueprint, jsonify, request
 
 from core.db import dismiss_recovery, get_income_stats, get_income_trades
+from core.income_range import resolve_income_date_range
 from services.income_sync import run_sync as run_income_sync
 from services.recovery import attach_recovery_summaries, compute_recovery, sum_recovery_pnl_filtered
 
@@ -13,6 +14,14 @@ log = logging.getLogger(__name__)
 bp = Blueprint("income", __name__)
 
 _income_sync_lock = threading.Lock()
+
+
+def _income_date_bounds_from_request():
+    preset = request.args.get("range", "all").strip()
+    df = request.args.get("date_from", "").strip()
+    dte = request.args.get("date_to", "").strip()
+    a, b = resolve_income_date_range(preset, df, dte)
+    return (a or ""), (b or "")
 
 
 @bp.route("/api/income/sync", methods=["POST"])
@@ -42,7 +51,10 @@ def api_income_trades():
         outcome = request.args.get("outcome", "").strip()
         sort_by = request.args.get("sort_by", "open_date").strip()
         sort_dir = request.args.get("sort_dir", "desc").strip()
-        data = get_income_trades(page, limit, ticker, status, strategy, outcome, sort_by, sort_dir)
+        date_from, date_to = _income_date_bounds_from_request()
+        data = get_income_trades(
+            page, limit, ticker, status, strategy, outcome, sort_by, sort_dir, date_from, date_to
+        )
         attach_recovery_summaries(data["data"])
         return jsonify(data)
     except Exception as e:
@@ -58,8 +70,11 @@ def api_income_stats():
         status = request.args.get("status", "").strip()
         strategy = request.args.get("strategy", "").strip()
         outcome = request.args.get("outcome", "").strip()
-        stats = get_income_stats(ticker, status, strategy, outcome)
-        stats["total_recovery_pnl"] = sum_recovery_pnl_filtered(ticker, status, strategy, outcome)
+        date_from, date_to = _income_date_bounds_from_request()
+        stats = get_income_stats(ticker, status, strategy, outcome, date_from, date_to)
+        rec_totals = sum_recovery_pnl_filtered(ticker, status, strategy, outcome, date_from, date_to)
+        stats["total_recovery_pnl"] = rec_totals["recovery_pnl"]
+        stats["total_true_recovery_pnl"] = rec_totals["true_recovery_pnl"]
         return jsonify(stats)
     except Exception as e:
         log.exception("API error")
