@@ -299,7 +299,7 @@
       <th class="sortable ip-sortable" onclick="setIncomePnlSort('net_pnl')">Net P&amp;L <span class="sort-arrow" id="ip-sa-net_pnl"></span></th>
       <th>P&amp;L %</th>
       <th>Status</th>
-      <th title="net P&amp;L ÷ max(1,days) ÷ short strike × 100 (heuristic)">Score</th>
+      <th class="sortable ip-sortable" title="net P&amp;L ÷ √(days+1) × 100 ÷ short strike — Sharpe-like efficiency" onclick="setIncomePnlSort('score')">Score <span class="sort-arrow" id="ip-sa-score"></span></th>
       <th>Outcome</th>
     </tr></thead><tbody id="ip-tbody"></tbody></table>
   </div>

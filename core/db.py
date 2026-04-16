@@ -1271,6 +1271,43 @@ def _income_attach_legs(cur, trades):
         t["legs"] = legs_by_trade.get(t["id"], [])
 
 
+def _income_efficiency_score(trade: dict) -> float | None:
+    """Same formula as static/js/income.js _incomeEfficiencyScore.
+
+    score = net_pnl / sqrt(days_held + 1) * 100 / strike
+
+    sqrt normalises time sublinearly (Sharpe-like) so short-duration
+    trades aren't disproportionately inflated vs longer ones.
+    """
+    import math
+    if trade.get("status") == "open":
+        return None
+    net = trade.get("net_pnl")
+    if net is None:
+        return None
+    legs = trade.get("legs") or []
+    strike = None
+    for leg in legs:
+        if leg.get("direction") == "short":
+            k = leg.get("strike")
+            if k is not None:
+                kf = float(k)
+                if kf > 0:
+                    strike = kf
+                    break
+    if strike is None and legs:
+        k = legs[0].get("strike")
+        if k is not None:
+            kf = float(k)
+            if kf > 0:
+                strike = kf
+    if strike is None:
+        return None
+    d = trade.get("days_held")
+    d = int(d) if d is not None and d >= 0 else 0
+    return (float(net) / math.sqrt(d + 1)) * (100.0 / strike)
+
+
 def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outcome="",
                       sort_by="open_date", sort_dir="desc"):
     offset = (page - 1) * limit
@@ -1320,6 +1357,19 @@ def get_income_trades(page=1, limit=25, ticker="", status="", strategy="", outco
                         return float("-inf") if rev else float("inf")
                     return v
                 trades.sort(key=_pnl_key, reverse=rev)
+            trades = trades[offset:offset + limit]
+        elif sb == "score":
+            cur.execute(f"SELECT t.* FROM income_trades t {clause} ORDER BY t.id DESC", params)
+            trades = [dict(r) for r in cur.fetchall()]
+            _income_attach_legs(cur, trades)
+
+            def _score_key(t):
+                v = _income_efficiency_score(t)
+                if v is None:
+                    return float("-inf") if rev else float("inf")
+                return v
+
+            trades.sort(key=_score_key, reverse=rev)
             trades = trades[offset:offset + limit]
         else:
             order_col = sort_map.get(sb, "t.open_date")

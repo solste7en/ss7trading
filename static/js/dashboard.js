@@ -1716,16 +1716,17 @@ function _incomeScoreStrike(legs) {
 }
 
 /**
- * Closed-trade efficiency: net_pnl / max(1,days_held) * 100 / strike.
- * Open trades: null (show —).
+ * Closed-trade efficiency: net_pnl / sqrt(days_held + 1) * 100 / strike.
+ * sqrt normalizes time sublinearly (Sharpe-like) so short holds aren't
+ * disproportionately inflated vs longer trades.  Open trades: null (show —).
  */
 function _incomeEfficiencyScore(t) {
   if (!t || t.status === 'open') return null;
   if (t.net_pnl == null) return null;
   const strike = _incomeScoreStrike(t.legs || []);
   if (strike == null) return null;
-  const days = t.days_held != null && t.days_held > 0 ? t.days_held : 1;
-  return (t.net_pnl / days) * (100 / strike);
+  const d = t.days_held != null && t.days_held >= 0 ? t.days_held : 0;
+  return (t.net_pnl / Math.sqrt(d + 1)) * (100 / strike);
 }
 
 function setIncomePnlSort(key) {
@@ -1740,7 +1741,7 @@ function setIncomePnlSort(key) {
 }
 
 function _updateIpSortArrows() {
-  const keys = ['open_date', 'close_date', 'recovery', 'recovery_pnl', 'net_pnl', 'days_held', 'net_premium'];
+  const keys = ['open_date', 'close_date', 'recovery', 'recovery_pnl', 'net_pnl', 'days_held', 'net_premium', 'score'];
   for (const k of keys) {
     const el = document.getElementById('ip-sa-' + k);
     if (!el) continue;
@@ -1925,7 +1926,7 @@ function _renderIncomeTrades(trades) {
       <td class="${pnlClass}">${pnlStr}</td>
       <td class="${pnlClass}">${pnlPctStr}</td>
       <td>${statusBadge}</td>
-      <td class="${scoreClass}" title="net P&amp;L ÷ max(1,days) ÷ short strike × 100">${scoreStr}</td>
+      <td class="${scoreClass}" title="net P&amp;L ÷ √(days+1) × 100 ÷ short strike">${scoreStr}</td>
       <td>${outcomeBadge}</td>
     </tr>`;
 
