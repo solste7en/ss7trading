@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Optional, Tuple
 
 
 def resolve_income_date_range(
     preset: str,
     date_from: str = "",
     date_to: str = "",
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """Return inclusive (date_from, date_to) as YYYY-MM-DD, or (None, None) = no filter.
 
     ``custom`` uses ``date_from`` / ``date_to`` query params when both are set.

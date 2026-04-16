@@ -416,7 +416,7 @@ def _fix_up_exercised_long_legs(matched_legs, lookup_equity_actions):
         gkey = (leg["underlying"], leg["open_date"], leg["expiry"])
         groups[gkey].append(leg)
 
-    for gkey, legs in groups.items():
+    for _gkey, legs in groups.items():
         short_assigned = [
             l for l in legs
             if l["direction"] == "short" and l.get("close_action") == "Assigned"

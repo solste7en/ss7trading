@@ -43,6 +43,11 @@ Income P&L maintenance and correctness: historical sync window, date filtering i
 
 - **README** — version **0.3.1**, Income P&L section and API table aligned with current behavior; project tree lists `income_range.py` and `test_income_range.py`
 
+### CI fixes (same release line)
+
+- **Ruff** — `core/income_range.py`: modern `tuple[…]` / `str | None` annotations; `services/income_sync.py`: `_gkey` in `_fix_up_exercised_long_legs` (B007)
+- **Tests** — `test_api_income_stats` mocks `sum_recovery_pnl_filtered` with `{"recovery_pnl", "true_recovery_pnl"}` to match the route handler
+
 ---
 
 ## [0.3.0] — 2026-04-12

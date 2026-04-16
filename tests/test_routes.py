@@ -200,7 +200,10 @@ class TestSyncBlueprint:
 
 class TestIncomeBlueprint:
     @patch("blueprints.income.get_income_stats", return_value={"total_premium": 1000})
-    @patch("blueprints.income.sum_recovery_pnl_filtered", return_value=0.0)
+    @patch(
+        "blueprints.income.sum_recovery_pnl_filtered",
+        return_value={"recovery_pnl": 0.0, "true_recovery_pnl": 0.0},
+    )
     def test_api_income_stats(self, _m1, _m2, client):
         r = client.get("/api/income/stats")
         assert r.status_code == 200
