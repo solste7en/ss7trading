@@ -4,6 +4,47 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [0.3.1] — 2026-04-16
+
+Income P&L maintenance and correctness: historical sync window, date filtering in the UI and API, spread exercise vs assignment handling, recovery KPI semantics, and early-assignment tagging that survives spread close-out.
+
+### Income sync (`services/income_sync.py`)
+
+- **Lookback start** — full re-sync pulls option transactions from **2025-01-01** (was calendar-year-only in older docs)
+- **Chunked API fetch** — transactions requested in **90-day** segments with `activityId` deduplication to avoid Schwab `get_transactions` range limits on long windows
+- **CLI** — `python3 -m services.income_sync` runs a full income re-sync from the project root (with `venv` activated)
+- **Assignment vs auto-exercise** — equity `TRADE` rows at the strike are keyed by `(underlying, date, strike)` with a **set of actions** so a Buy (short put assigned) and a Sell (long put exercised) on the same day both survive
+- **Expired option reclassification** — uses option type + equity direction to map `Expired` + equity at strike to **Assigned** vs **Exchange or Exercise** where applicable; ambiguous same-day collisions still resolve via post-match fix-up
+- **`_fix_up_exercised_long_legs`** — after FIFO matching, if a vertical spread has an **Assigned** short and the long is still open, and an equity trade at the long strike matches exercise direction (put → Sell), the long is closed as **Exchange or Exercise** so spread P&L and leg state are correct
+- **Fully exercised spreads** — `put_spread` / `call_spread` with short **Assigned** and long **Exchange or Exercise** → `is_fully_exercised` on `income_trades` (stock nets out; no recovery)
+- **Early assignment** — `is_early_assignment` is set when the **short** leg’s `close_date` is **before** that leg’s expiry (not the trade-level max close date), so a long exercised on expiry does not clear the early badge
+
+### Database (`core/db.py`)
+
+- **`income_trades.is_fully_exercised`** — integer flag with automatic `ALTER TABLE` migration on existing DBs; included in `upsert_income_trade`
+
+### Recovery (`services/recovery.py`)
+
+- Skips **`is_fully_exercised`** trades in `compute_recovery` and `attach_recovery_summaries` (no phantom recovery targets or P&L)
+
+### Income P&L UI and API
+
+- **Date range** — presets + custom from/to on the Income P&L tab; `range`, `date_from`, `date_to` on `/api/income/trades` and `/api/income/stats`
+- **`core/income_range.py`** — `resolve_income_date_range` for preset → inclusive bounds; **`tests/test_income_range.py`**
+- **KPI cards** — Option Net P&L, Recovery Net P&L (true vs assignment price), Sum Net P&L; option-only tooltip on the first card
+- **Table** — Rec. P&L column uses true recovery where applicable; expanded recovery rows show vs-strike and vs-assignment with color; **exercised** and **early** status badges; expanded note for fully exercised spreads instead of a recovery grid
+- **Score** — sortable header; formula uses **√(days held + 1)** in the denominator
+
+### Frontend / styling
+
+- **`static/js/income.js`**, **`static/js/dashboard.js`**, **`static/css/style.css`** — date filter wiring, badges, recovery display tweaks
+
+### Documentation
+
+- **README** — version **0.3.1**, Income P&L section and API table aligned with current behavior; project tree lists `income_range.py` and `test_income_range.py`
+
+---
+
 ## [0.3.0] — 2026-04-12
 
 Major feature release: **Analytics** and **Consolidation Intelligence** tabs. Portfolio-level performance tracking, sector exposure analysis, and an intelligent consolidation engine for overlapping/underwater positions with peer comparison, ETF alternatives, tax-loss harvesting, and options strategy suggestions.

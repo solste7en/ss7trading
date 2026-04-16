@@ -2,7 +2,7 @@
 
 A personal trading dashboard and order management tool built on the Schwab API. Tracks positions and trade history, syncs transactions to a local SQLite database, and supports order entry — including ladder orders and multi-leg options strategies — directly from the browser.
 
-**Current version: 0.3.0**
+**Current version: 0.3.1**
 
 ---
 
@@ -63,7 +63,7 @@ The server runs at `http://127.0.0.1:5050`. Press `Ctrl+C` to stop.
 | **🔍 Consolidate** | Underwater positions list; sector overlap detection; peer comparison with composite scoring; ETF alternatives; tax-loss harvest candidates; covered call strategies for underwater positions |
 | **Quote** | Live quote for any symbol + quotes for held positions or custom watchlists (saved to DB) |
 | **Trade History** | Paginated transactions from `trades.db`, filterable by ticker, category, and keyword; **Sync from Schwab** with last-sync time and results modal |
-| **📊 Income P&L** | Option income strategy performance tracker: clickable KPI cards, paginated trade table with expandable leg detail, filters by ticker/status/strategy/outcome; "Sync from Schwab" rebuilds from API |
+| **📊 Income P&L** | Option income performance: date-range presets + custom range, KPI cards (option / recovery / sum net P&L), assignment recovery vs strike and true P&L vs assignment price, **exercised** spread tagging when both legs settle at expiry, **early** when the short is assigned before expiry; sortable table including Score; "Sync from Schwab" full rebuild |
 | **Realized G/L** | Closed-position gain/loss from **Schwab portal Realized G/L CSV** (not the API); banner explains refresh workflow; last import time from `MAX(imported_at)` in `realized_gains` |
 | **Trade** | Place equity/ETF or single-leg option orders; live quote card, TradingView chart, option chain browser (click-to-fill), and current holdings panel |
 | **Ladder** | Submit grouped limit orders at staggered prices; quick-fill helpers (even split, scale up/down); position unwind suggestion engine; two-column layout with independent scroll on wide screens — form on the left; **Holdings**, **Open Orders**, then **Recent Trades** on the right |
@@ -112,29 +112,33 @@ The **Income** tab is designed for generating income using options against exist
 
 ## 📊 Income P&L tab (income strategy performance tracker)
 
-Tracks the full history of option income trades from the current calendar year onward (since January 1 of the running year), grouped by strategy and linked to their open/close legs.
+Tracks option income trades from **2025-01-01** through today (full re-sync window). The Schwab transactions API is queried in **90-day chunks** with deduplication so long lookbacks stay within API limits.
 
 **How it works:**
 
-1. Click **Sync from Schwab** to fetch all option transactions for the configured year window fresh from the Schwab API
-2. The sync engine builds a FIFO-matched ledger: each STO/BTO opening leg is paired with its BTC/STC/Expired/Assigned closing leg
-3. Matched legs are grouped into trades by strategy type (naked, spread, collar)
-4. Assignment detection: the Schwab API marks assigned options as "Expired"; the sync cross-references equity TRADE events at the strike price to correctly reclassify them
-5. P&L is calculated: net premium collected, close cost (BTC price or assignment intrinsic value), fees, net P&L, and win/perfect-win classification
+1. Click **Sync from Schwab** (or run `python3 -m services.income_sync` from the project root with `venv` activated) to pull transactions, rebuild FIFO-matched legs, and rewrite `income_trades` / `income_trade_legs`
+2. Each STO/BTO opening leg is paired with its close: BTC/STC, **Expired**, **Assigned**, or **Exchange or Exercise** (auto-exercise)
+3. Matched legs are grouped into trades (naked put/call, vertical spread, collar)
+4. **Assignment vs exercise:** `RECEIVE_AND_DELIVER` option events with zero net often mean assignment or exercise. The sync cross-references **equity TRADE** rows at the strike (and direction: e.g. put assignment → Buy at strike, long put exercise → Sell at strike). A post-match step closes long spread legs that were auto-exercised when the short was assigned, so spread P&L is not overstated
+5. **Fully exercised vertical spreads** (short assigned + long exercised at expiry, net flat stock): flagged in the DB, **exercised** badge in the UI, recovery matching skipped (no share recovery)
+6. **Early assignment** on the **short** leg (close date before that leg’s expiry) adds an **early** badge; this is evaluated per short leg so a late long exercise does not hide an early short assignment
+7. P&L: net premium, close cost (including intrinsic on assignment/exercise where applicable), fees, net P&L, win / perfect-win
 
-**KPI cards** (5 are clickable — click to filter the table; click again to deselect):
+**Date range** (toolbar): presets such as last 7 / 30 / 90 / 365 days, month-to-date, current year, last calendar year, and **Custom** (`date_from` / `date_to`). Stats and the trade table respect the same range.
 
-- **Total Net P&L** — aggregate net P&L across all filtered trades
-- **Win Rate** — percentage of closed trades with net P&L > 0
-- **Perfect Win Rate** — percentage where the short option expired nearly worthless (close cost < 3% of original premium)
-- **Closed Trades** / **Open Trades** / **Assigned** — trade counts by status
+**KPI cards** (clickable where noted — click to filter the table; click again to deselect):
+
+- **Option Net P&L** — option legs only (assigned rows still show option-only net; hover the help icon for the tooltip)
+- **Recovery Net P&L** — sum of **true** recovery P&L (equity exits vs **assignment stock price**, not vs strike)
+- **Sum Net P&L** — option net + recovery net
+- **Win Rate**, **Perfect Win Rate**, **Closed** / **Open** / **Assigned** counts
 
 **Trade table:**
 
-- Expandable rows — click any row to show individual leg detail (strike, expiry, direction, open/close action and price, dates)
-- Filters: ticker, status (Open / Closed / Expired / Assigned), strategy (Naked / Spread / Collar), page size
-- Strategy, status, and outcome badges with distinct colors
-- **Score** (before Outcome): for closed trades, `net P&L ÷ max(1, days held) ÷ short-leg strike × 100` (negative on losses). Open trades show —. This is a simple time- and strike-scaled heuristic, not risk-adjusted notional.
+- Expandable rows — legs, recovery detail (when applicable), or a short note for fully exercised spreads
+- Filters: ticker, status, strategy, outcome (from KPI), page size; **Recovery** and **Rec. P&L** columns sortable
+- Badges: strategy, **assigned** + optional **early** + optional **exercised**, outcome
+- **Score** (sortable): `net P&L ÷ √(days held + 1) × (100 ÷ short strike)` — sublinear time normalization so same-day trades are not outliers
 
 On the **💰 Income** tab, the **P&amp;L Preview** panel includes **Max score (perfect, ÷DTE)** for naked, spread, and collar (not bundle): it uses max profit (or net credit) ÷ calendar days to selected expiration ÷ short strike × 100, as an upper bound if the trade expired perfectly—ignoring fees and path risk. With **price ladder** enabled, the same idea is shown for **rung 1** under the ladder preview table.
 
@@ -183,8 +187,8 @@ python3 sync_trades.py --dry-run    # preview without writing
 | `/api/watchlists/<id>/symbols/<sym>` | DELETE | Remove a symbol from a watchlist |
 | `/api/quotes/list/<id>` | GET | Live quotes for all symbols in a watchlist |
 | `/api/income/sync` | POST | Trigger full re-sync of income trades from Schwab API |
-| `/api/income/trades` | GET | Paginated income trades (filters: ticker, status, strategy, outcome) |
-| `/api/income/stats` | GET | Aggregate KPI stats for income trades |
+| `/api/income/trades` | GET | Paginated income trades (`ticker`, `status`, `strategy`, `outcome`, `sort_by`, `sort_dir`, plus `range` preset or `date_from` / `date_to` for custom) |
+| `/api/income/stats` | GET | Aggregate KPI stats for income trades (same filter and date params as trades) |
 | `/api/test` | GET | Connectivity test |
 | `/api/trades/last-sync` | GET | Last trade sync time and most-traded ticker |
 | `/api/trades/sync` | POST | Run trade sync from Schwab (dynamic lookback; rejects if DB migrations pending) |
@@ -283,6 +287,7 @@ schwab_app/
 │   ├── auth.py             # Schwab OAuth (run once: python -m core.auth)
 │   ├── config.py           # Loads credentials from .env; defines DB_PATH
 │   ├── db.py               # SQLite access layer (all query functions)
+│   ├── income_range.py     # Income P&L date-range presets → inclusive YYYY-MM-DD bounds
 │   └── migrate_db.py       # Versioned schema migrations (python -m core.migrate_db)
 │
 ├── services/               # Business logic layer
@@ -317,12 +322,13 @@ schwab_app/
 │   ├── css/style.css       # Dark theme (CSS custom properties + component rules)
 │   └── js/                 # ES modules (analytics.js, overview.js, main.js, …)
 │
-├── tests/                  # pytest suite (~195 tests)
+├── tests/                  # pytest suite (~198 tests)
 │   ├── conftest.py
 │   ├── test_analytics.py
 │   ├── test_app_helpers.py
 │   ├── test_benchmarks.py
 │   ├── test_db.py
+│   ├── test_income_range.py
 │   ├── test_income_sync.py
 │   ├── test_recovery.py
 │   ├── test_routes.py
