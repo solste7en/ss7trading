@@ -326,6 +326,20 @@
     </tr></thead><tbody id="ip-tbody"></tbody></table>
   </div>
   <div class="pagination" id="ip-pagination"></div>
+
+  <!-- Recovery Dashboard — collapsible per-ticker summary -->
+  <div class="ip-rec-dash-bar">
+    <button class="ip-rec-dash-toggle" id="ip-rec-dash-toggle"
+            onclick="toggleRecoverySummary()">
+      <span id="ip-rec-dash-arrow">▶</span> Recovery Dashboard
+      <span class="ip-rec-dash-count" id="ip-rec-dash-count"></span>
+    </button>
+  </div>
+  <div id="ip-rec-dash" style="display:none">
+    <div id="ip-rec-dash-loading" class="ip-rec-dash-status">Loading…</div>
+    <div id="ip-rec-dash-error"  class="ip-rec-dash-status" style="display:none"></div>
+    <div id="ip-rec-dash-body"></div>
+  </div>
 </div>
 
 <!-- ── Realized G/L (portal CSV — last in Records) ── -->

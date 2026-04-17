@@ -853,6 +853,79 @@ tr.pos-dragging td { opacity: 0.55; }
 .ip-recovery-row { background: var(--color-ip-recovery-row-bg); }
 .ip-recovery-row td { border-bottom: 1px solid var(--color-ip-recovery-border) !important; }
 
+/* ── Recovery Dashboard (per-ticker summary) ── */
+.ip-rec-dash-bar {
+  margin-top: 16px;
+  display: flex; align-items: center;
+}
+.ip-rec-dash-toggle {
+  background: none; border: 1px solid var(--color-border-subtle); border-radius: 6px;
+  color: var(--color-text-secondary); font-size: 11px; font-weight: 600;
+  padding: 5px 12px; cursor: pointer; letter-spacing: .04em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: border-color .15s, color .15s;
+}
+.ip-rec-dash-toggle:hover { border-color: var(--color-accent); color: var(--color-text); }
+.ip-rec-dash-count {
+  background: var(--color-accent-deep); color: var(--color-accent-text);
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+}
+#ip-rec-dash {
+  margin-top: 10px; margin-bottom: 20px;
+}
+.ip-rec-dash-status {
+  font-size: 12px; color: var(--color-text-muted); padding: 8px 0;
+}
+.ip-rec-dash-empty {
+  font-size: 12px; color: var(--color-text-muted); padding: 12px 0;
+  font-style: italic;
+}
+.ip-rec-dash-tbl {
+  width: 100%; border-collapse: collapse;
+  font-size: 12px; border: 1px solid var(--color-border-subtle); border-radius: 8px;
+}
+.ip-rec-dash-tbl thead th {
+  background: var(--color-surface-2); color: var(--color-text-muted);
+  font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+  padding: 8px 10px; text-align: left; white-space: nowrap;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.ip-rec-dash-tbl tbody tr {
+  border-bottom: 1px solid var(--color-surface);
+  transition: background .1s;
+}
+.ip-rec-dash-tbl tbody tr:last-child { border-bottom: none; }
+.ip-rec-dash-tbl tbody tr:hover { background: var(--color-surface-2); }
+.ip-rec-dash-tbl td {
+  padding: 9px 10px; white-space: nowrap; vertical-align: middle;
+}
+.ip-rec-dash-bar-cell {
+  min-width: 140px;
+  display: flex; align-items: center; gap: 8px;
+}
+.ip-rec-dash-bar-wrap {
+  flex: 1; height: 6px; background: var(--color-slate-bar-bg);
+  border-radius: 3px; overflow: hidden; min-width: 80px;
+}
+.ip-rec-dash-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-purple-600), var(--color-violet-bright));
+  border-radius: 3px; transition: width .3s ease;
+}
+.ip-rec-dash-pct {
+  font-size: 10px; color: var(--color-text-soft); min-width: 32px;
+}
+.ip-rec-dash-remaining {
+  color: var(--color-amber); font-weight: 600;
+}
+.ip-rec-dash-done {
+  background: var(--color-success-box-bg); color: var(--color-success-text);
+  border: 1px solid var(--color-success-box-border);
+}
+.ip-rec-dash-progress {
+  background: var(--color-amber-badge-bg, #422006); color: var(--color-amber, #f59e0b);
+}
+
 /* ── Strategy tab ── */
 .strat-layout {
   display: grid;

@@ -3,6 +3,14 @@
 import datetime
 import re
 
+# Income-strategy suggester tuning. These defaults target the "theta sweet spot"
+# (21-45 DTE) while still offering a shorter-dated option for users who want it.
+_DTE_TARGETS = (14, 30, 45)
+_MIN_DTE = 7
+_DELTA_TARGETS = (0.30, 0.20, 0.15)
+_PCT_OTM_TARGETS = (0.03, 0.05, 0.08)
+_MAX_SUGGESTIONS = 12
+
 
 def clean_option_map(exp_date_map):
     """Flatten Schwab's nested {expiryDate: {strike: [contracts]}} into a simple list."""
@@ -30,6 +38,127 @@ def clean_option_map(exp_date_map):
     return result
 
 
+def _select_expirations(all_exps, targets=_DTE_TARGETS, min_dte=_MIN_DTE,
+                        today=None):
+    """Pick one expiry closest to each target DTE (deduped), skipping <min_dte.
+
+    Falls back to whatever is available when the chain is sparse, so we always
+    return at least one expiry when the input is non-empty. Output is sorted
+    chronologically.
+    """
+    if not all_exps:
+        return []
+    today = today or datetime.date.today()
+
+    dated = []
+    for e in all_exps:
+        try:
+            d = datetime.date.fromisoformat(e)
+        except (TypeError, ValueError):
+            continue
+        dated.append((e, (d - today).days))
+
+    if not dated:
+        return []
+
+    eligible = [(e, dte) for e, dte in dated if dte >= min_dte]
+    pool = eligible or dated
+
+    picked = set()
+    for target in targets:
+        best = min(pool, key=lambda x: abs(x[1] - target))
+        picked.add(best[0])
+
+    return sorted(picked)
+
+
+def _pick_short_strikes(contracts, last, side, n=3,
+                        delta_targets=_DELTA_TARGETS,
+                        pct_targets=_PCT_OTM_TARGETS):
+    """Pick up to *n* short-leg candidates from *contracts*.
+
+    *side* is ``"put"`` or ``"call"``. Prefers delta-targeted selection when
+    Schwab populated delta on the contracts; otherwise falls back to
+    percent-OTM-targeted selection. Always OTM, always bid > 0.05. Prefers
+    liquid contracts (oi or volume > 0) but relaxes the filter per-bucket if
+    nothing liquid matches.
+    """
+    if not contracts or not last:
+        return []
+
+    if side == "put":
+        otm = [c for c in contracts if c.get("strike") and c["strike"] < last]
+    else:
+        otm = [c for c in contracts if c.get("strike") and c["strike"] > last]
+
+    otm = [c for c in otm if (c.get("bid") or 0) > 0.05]
+    if not otm:
+        return []
+
+    liquid = [c for c in otm if (c.get("oi") or 0) > 0 or (c.get("volume") or 0) > 0]
+
+    has_delta = any(
+        c.get("delta") is not None and abs(c.get("delta") or 0) > 0.001
+        for c in otm
+    )
+
+    if has_delta:
+        def _dist(c, target):
+            d = c.get("delta")
+            if d is None:
+                return float("inf")
+            return abs(abs(d) - target)
+        targets = delta_targets
+        dist_fn = _dist
+    else:
+        def _dist(c, target):
+            strike = c.get("strike") or 0
+            pct = abs(strike - last) / last if last else float("inf")
+            return abs(pct - target)
+        targets = pct_targets
+        dist_fn = _dist
+
+    picked_syms = set()
+    result = []
+    for target in targets[:n]:
+        pool = liquid or otm
+        ranked = sorted(pool, key=lambda c: dist_fn(c, target))
+        if liquid and ranked and dist_fn(ranked[0], target) == float("inf"):
+            ranked = sorted(otm, key=lambda c: dist_fn(c, target))
+        for c in ranked:
+            sym = c.get("symbol") or (c.get("strike"),)
+            if sym in picked_syms:
+                continue
+            picked_syms.add(sym)
+            result.append(c)
+            break
+
+    return result
+
+
+def _find_long_leg_by_width(contracts, short_strike, target_width, side):
+    """Find the long-leg contract closest to short_strike ± target_width.
+
+    *side* is ``"put"`` (long leg strike < short strike) or ``"call"`` (long
+    leg strike > short strike). Requires ask > 0. Returns None if nothing
+    qualifies.
+    """
+    if side == "put":
+        candidates = [c for c in contracts
+                      if c.get("strike") and c["strike"] < short_strike
+                      and (c.get("ask") or 0) > 0]
+        ideal = short_strike - target_width
+    else:
+        candidates = [c for c in contracts
+                      if c.get("strike") and c["strike"] > short_strike
+                      and (c.get("ask") or 0) > 0]
+        ideal = short_strike + target_width
+
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: abs(c["strike"] - ideal))
+
+
 def suggest_strategies(positions, quote, chain_data, ticker):
     """Analyse positions + option chain and return strategy suggestions."""
     suggestions = []
@@ -51,7 +180,8 @@ def suggest_strategies(positions, quote, chain_data, ticker):
     calls_map = chain_data.get("calls", {})
     puts_map = chain_data.get("puts", {})
 
-    usable_exps = [e for e in exps if (calls_map.get(e) or puts_map.get(e))][:2]
+    exps_with_data = [e for e in exps if (calls_map.get(e) or puts_map.get(e))]
+    usable_exps = _select_expirations(exps_with_data)
 
     for expiry in usable_exps:
         calls = calls_map.get(expiry, [])
@@ -63,12 +193,9 @@ def suggest_strategies(positions, quote, chain_data, ticker):
             if coverable < 1:
                 continue
 
-            # Covered Call
-            otm_calls = [c for c in calls
-                         if c["strike"] and c["strike"] > last
-                         and c["bid"] and c["bid"] > 0.05]
-            otm_calls.sort(key=lambda c: c["strike"])
-            for c in otm_calls[:3]:
+            # Covered Call — delta/pct-targeted short strikes
+            cc_candidates = _pick_short_strikes(calls, last, "call")
+            for c in cc_candidates:
                 premium = c["bid"]
                 total_prem = premium * coverable * 100
                 ann_yield = (premium / last) * (365 / days_to_exp)
@@ -78,7 +205,8 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                     "strategy": "naked",
                     "title": "Covered Call",
                     "description": f"Sell {coverable} CALL @ ${c['strike']:.2f}, {expiry}",
-                    "detail": f"Premium ~${premium:.2f}/sh (${total_prem:,.0f} total) · {ann_yield:.0%} ann. yield",
+                    "detail": (f"Premium ~${premium:.2f}/sh (${total_prem:,.0f} total) · "
+                               f"{ann_yield:.0%} ann. yield · {days_to_exp} DTE"),
                     "legs": [{
                         "type": "option", "instruction": "SELL_TO_OPEN",
                         "option_type": "CALL", "strike": c["strike"],
@@ -91,18 +219,18 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                     "max_profit": (c["strike"] - last) * abs(eq_qty) + total_prem if avg_price else None,
                     "breakeven": round(last - premium, 2),
                     "annualized_yield": round(ann_yield, 4),
+                    "days_to_expiry": days_to_exp,
                 })
 
             # Protective Collar
-            otm_puts = [p for p in puts
-                        if p["strike"] and p["strike"] < last
-                        and p["ask"] and p["ask"] > 0]
-            if otm_calls and otm_puts:
-                otm_puts.sort(key=lambda p: -p["strike"])
+            pp_candidates = _pick_short_strikes(puts, last, "put")
+            if cc_candidates and pp_candidates:
                 best_collar = None
                 best_net = 999
-                for cc in otm_calls[:4]:
-                    for pp in otm_puts[:4]:
+                for cc in cc_candidates:
+                    for pp in pp_candidates:
+                        if not pp.get("ask"):
+                            continue
                         net = pp["ask"] - cc["bid"]
                         if abs(net) < best_net:
                             best_net = abs(net)
@@ -116,7 +244,9 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                         "strategy": "collar",
                         "title": "Protective Collar",
                         "description": f"Sell {coverable} CALL @ ${cc['strike']:.2f} + Buy {coverable} PUT @ ${pp['strike']:.2f}, {expiry}",
-                        "detail": f"Net {'credit' if net < 0 else 'debit'}: ${abs(net):.2f}/sh (${abs(net_total):,.0f} total) · Protection below ${pp['strike']:.2f}",
+                        "detail": (f"Net {'credit' if net < 0 else 'debit'}: ${abs(net):.2f}/sh "
+                                   f"(${abs(net_total):,.0f} total) · "
+                                   f"Protection below ${pp['strike']:.2f} · {days_to_exp} DTE"),
                         "legs": [
                             {"type": "option", "instruction": "SELL_TO_OPEN",
                              "option_type": "CALL", "strike": cc["strike"],
@@ -131,21 +261,26 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                         "price": round(abs(net), 2),
                         "net_credit": round(-net_total, 2),
                         "breakeven": round(last + net, 2),
+                        "days_to_expiry": days_to_exp,
                     })
 
-            # Bear Call Spread
-            if len(otm_calls) >= 2:
-                sell_c = otm_calls[0]
-                buy_c = otm_calls[min(2, len(otm_calls) - 1)]
-                if sell_c["bid"] and buy_c["ask"] and sell_c["bid"] > buy_c["ask"]:
+            # Call Credit Spread — fixed-width, not arbitrary-index
+            if cc_candidates:
+                target_width = max(2.5, round(last * 0.025))
+                sell_c = cc_candidates[0]
+                buy_c = _find_long_leg_by_width(calls, sell_c["strike"], target_width, "call")
+                if buy_c and sell_c["bid"] and buy_c["ask"] and sell_c["bid"] > buy_c["ask"]:
                     net_cr = sell_c["bid"] - buy_c["ask"]
                     width = buy_c["strike"] - sell_c["strike"]
+                    ann_yield = (net_cr / last) * (365 / days_to_exp) if last else 0
                     suggestions.append({
                         "id": f"spread_{expiry}_{sell_c['strike']}_{buy_c['strike']}",
                         "strategy": "vertical",
                         "title": "Call Credit Spread",
                         "description": f"Sell {coverable} CALL @ ${sell_c['strike']:.2f} + Buy {coverable} CALL @ ${buy_c['strike']:.2f}, {expiry}",
-                        "detail": f"Net credit: ${net_cr:.2f}/sh · Max risk: ${width - net_cr:.2f}/sh",
+                        "detail": (f"Net credit: ${net_cr:.2f}/sh · "
+                                   f"Width ${width:.2f} · Max risk: ${width - net_cr:.2f}/sh · "
+                                   f"{days_to_exp} DTE"),
                         "legs": [
                             {"type": "option", "instruction": "SELL_TO_OPEN",
                              "option_type": "CALL", "strike": sell_c["strike"],
@@ -160,6 +295,8 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                         "price": round(net_cr, 2),
                         "net_credit": round(net_cr * coverable * 100, 2),
                         "max_loss": round((width - net_cr) * coverable * 100, 2),
+                        "annualized_yield": round(ann_yield, 4),
+                        "days_to_expiry": days_to_exp,
                     })
 
         elif eq_qty < 0:
@@ -167,12 +304,9 @@ def suggest_strategies(positions, quote, chain_data, ticker):
             if coverable < 1:
                 continue
 
-            # Cash-Secured Put
-            otm_puts = [p for p in puts
-                        if p["strike"] and p["strike"] < last
-                        and p["bid"] and p["bid"] > 0.05]
-            otm_puts.sort(key=lambda p: -p["strike"])
-            for p in otm_puts[:3]:
+            # Cash-Secured Put — delta/pct-targeted short strikes
+            csp_candidates = _pick_short_strikes(puts, last, "put")
+            for p in csp_candidates:
                 premium = p["bid"]
                 total_prem = premium * coverable * 100
                 ann_yield = (premium / last) * (365 / days_to_exp)
@@ -181,7 +315,8 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                     "strategy": "naked",
                     "title": "Cash-Secured Put",
                     "description": f"Sell {coverable} PUT @ ${p['strike']:.2f}, {expiry}",
-                    "detail": f"Premium ~${premium:.2f}/sh (${total_prem:,.0f} total) · {ann_yield:.0%} ann. yield",
+                    "detail": (f"Premium ~${premium:.2f}/sh (${total_prem:,.0f} total) · "
+                               f"{ann_yield:.0%} ann. yield · {days_to_exp} DTE"),
                     "legs": [{
                         "type": "option", "instruction": "SELL_TO_OPEN",
                         "option_type": "PUT", "strike": p["strike"],
@@ -193,18 +328,18 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                     "net_credit": total_prem,
                     "breakeven": round(p["strike"] - premium, 2),
                     "annualized_yield": round(ann_yield, 4),
+                    "days_to_expiry": days_to_exp,
                 })
 
             # Short Collar
-            otm_calls = [c for c in calls
-                         if c["strike"] and c["strike"] > last
-                         and c["ask"] and c["ask"] > 0]
-            if otm_puts and otm_calls:
-                otm_calls.sort(key=lambda c: c["strike"])
+            cc_candidates = _pick_short_strikes(calls, last, "call")
+            if csp_candidates and cc_candidates:
                 best_collar = None
                 best_net = 999
-                for pp in otm_puts[:4]:
-                    for cc in otm_calls[:4]:
+                for pp in csp_candidates:
+                    for cc in cc_candidates:
+                        if not cc.get("ask"):
+                            continue
                         net = cc["ask"] - pp["bid"]
                         if abs(net) < best_net:
                             best_net = abs(net)
@@ -218,7 +353,8 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                         "strategy": "collar",
                         "title": "Short Collar",
                         "description": f"Sell {coverable} PUT @ ${pp['strike']:.2f} + Buy {coverable} CALL @ ${cc['strike']:.2f}, {expiry}",
-                        "detail": f"Net {'debit' if net > 0 else 'credit'}: ${abs(net):.2f}/sh · Upside protection above ${cc['strike']:.2f}",
+                        "detail": (f"Net {'debit' if net > 0 else 'credit'}: ${abs(net):.2f}/sh · "
+                                   f"Upside protection above ${cc['strike']:.2f} · {days_to_exp} DTE"),
                         "legs": [
                             {"type": "option", "instruction": "SELL_TO_OPEN",
                              "option_type": "PUT", "strike": pp["strike"],
@@ -232,21 +368,26 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                         "order_type": ot,
                         "price": round(abs(net), 2),
                         "net_credit": round(-net_total, 2),
+                        "days_to_expiry": days_to_exp,
                     })
 
-            # Put Credit Spread
-            if len(otm_puts) >= 2:
-                sell_p = otm_puts[0]
-                buy_p = otm_puts[min(2, len(otm_puts) - 1)]
-                if sell_p["bid"] and buy_p["ask"] and sell_p["bid"] > buy_p["ask"]:
+            # Put Credit Spread — fixed-width, not arbitrary-index
+            if csp_candidates:
+                target_width = max(2.5, round(last * 0.025))
+                sell_p = csp_candidates[0]
+                buy_p = _find_long_leg_by_width(puts, sell_p["strike"], target_width, "put")
+                if buy_p and sell_p["bid"] and buy_p["ask"] and sell_p["bid"] > buy_p["ask"]:
                     net_cr = sell_p["bid"] - buy_p["ask"]
                     width = sell_p["strike"] - buy_p["strike"]
+                    ann_yield = (net_cr / last) * (365 / days_to_exp) if last else 0
                     suggestions.append({
                         "id": f"pspread_{expiry}_{sell_p['strike']}_{buy_p['strike']}",
                         "strategy": "vertical",
                         "title": "Put Credit Spread",
                         "description": f"Sell {coverable} PUT @ ${sell_p['strike']:.2f} + Buy {coverable} PUT @ ${buy_p['strike']:.2f}, {expiry}",
-                        "detail": f"Net credit: ${net_cr:.2f}/sh · Max risk: ${width - net_cr:.2f}/sh",
+                        "detail": (f"Net credit: ${net_cr:.2f}/sh · "
+                                   f"Width ${width:.2f} · Max risk: ${width - net_cr:.2f}/sh · "
+                                   f"{days_to_exp} DTE"),
                         "legs": [
                             {"type": "option", "instruction": "SELL_TO_OPEN",
                              "option_type": "PUT", "strike": sell_p["strike"],
@@ -261,7 +402,17 @@ def suggest_strategies(positions, quote, chain_data, ticker):
                         "price": round(net_cr, 2),
                         "net_credit": round(net_cr * coverable * 100, 2),
                         "max_loss": round((width - net_cr) * coverable * 100, 2),
+                        "annualized_yield": round(ann_yield, 4),
+                        "days_to_expiry": days_to_exp,
                     })
+
+    # Sort by annualized yield (desc) so the highest-efficiency ideas rise to
+    # the top and short DTE can no longer dominate by being listed first.
+    # Suggestions without a yield (e.g. collars) keep their insertion order
+    # relative to yielded suggestions but sink below them.
+    suggestions.sort(key=lambda s: -(s.get("annualized_yield") or 0))
+    if len(suggestions) > _MAX_SUGGESTIONS:
+        suggestions = suggestions[:_MAX_SUGGESTIONS]
 
     # Existing short option positions — suggest roll / close
     for p in opt_pos:

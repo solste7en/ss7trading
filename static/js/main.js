@@ -25,6 +25,7 @@ import {
   loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
   toggleIncomeTrade, dismissRecovery, syncIncome, _ipOnStatusChange,
   onIpDateRangeChange, onIpCustomDateChange,
+  toggleRecoverySummary,
 } from './income.js';
 import {
   setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
@@ -80,7 +81,7 @@ Object.assign(window, {
   // income
   loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
   toggleIncomeTrade, dismissRecovery, syncIncome, _ipOnStatusChange,
-  onIpDateRangeChange, onIpCustomDateChange,
+  onIpDateRangeChange, onIpCustomDateChange, toggleRecoverySummary,
   // trade
   setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
   previewOrder, submitPendingOrder, clearTradeResult, showTradeError,

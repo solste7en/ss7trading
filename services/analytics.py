@@ -93,10 +93,20 @@ def compute_concentration(positions):
     for p in positions:
         if p.get("asset_type") not in ("EQUITY", "ETF"):
             continue
-        mv = abs(p.get("market_value") or 0)
-        holdings.append({"symbol": p["symbol"], "market_value": mv,
-                         "unrealized_pl": p.get("unrealized_pl"),
-                         "day_pl": p.get("day_pl")})
+        raw_mv = p.get("market_value") or 0
+        mv = abs(float(raw_mv))
+        qty = p.get("quantity")
+        if qty is not None and qty != 0:
+            side = "short" if qty < 0 else "long"
+        else:
+            side = "short" if float(raw_mv) < 0 else "long"
+        holdings.append({
+            "symbol": p["symbol"],
+            "market_value": mv,
+            "side": side,
+            "unrealized_pl": p.get("unrealized_pl"),
+            "day_pl": p.get("day_pl"),
+        })
         total += mv
 
     holdings.sort(key=lambda h: -h["market_value"])

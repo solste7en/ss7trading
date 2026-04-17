@@ -359,7 +359,7 @@ function _renderConcentrationChart(concentration) {
       labels: top.map(h => h.symbol),
       datasets: [{
         data: top.map(h => h.pct),
-        backgroundColor: c.accent + 'cc',
+        backgroundColor: top.map(h => ((h.side === 'short') ? c.neg : c.pos) + 'cc'),
         borderRadius: 3,
       }],
     },
@@ -368,11 +368,19 @@ function _renderConcentrationChart(concentration) {
       indexAxis: 'y',
       plugins: {
         legend: { display: false },
+        subtitle: {
+          display: true,
+          text: 'Long (green) · Short (red)',
+          color: c.text,
+          font: { size: 11, weight: 'normal' },
+          padding: { bottom: 6 },
+        },
         tooltip: {
           callbacks: {
             label: (ctx) => {
               const h = top[ctx.dataIndex];
-              return `${h.pct.toFixed(1)}% · ${_fmtCurrency(h.market_value)}`;
+              const side = h.side === 'short' ? 'Short' : 'Long';
+              return `${side}: ${h.pct.toFixed(1)}% · ${_fmtCurrency(h.market_value)}`;
             },
           },
         },

@@ -153,6 +153,29 @@ class TestConcentration:
         result = compute_concentration([])
         assert result["hhi"] == 0
 
+    def test_side_long_for_fixture_positions(self, positions):
+        result = compute_concentration(positions)
+        for h in result["holdings"]:
+            assert h["side"] == "long"
+
+    def test_side_short_for_negative_quantity(self):
+        positions = [
+            {
+                "symbol": "TSLA",
+                "asset_type": "EQUITY",
+                "market_value": -4500,
+                "quantity": -30,
+                "avg_price": -150.0,
+                "current_price": 150.0,
+                "unrealized_pl": -200,
+                "day_pl": 0,
+            },
+        ]
+        result = compute_concentration(positions)
+        assert len(result["holdings"]) == 1
+        assert result["holdings"][0]["side"] == "short"
+        assert result["holdings"][0]["market_value"] == 4500
+
 
 # ── find_overlap_groups ───────────────────────────────────────────────────
 

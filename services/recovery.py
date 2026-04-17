@@ -180,6 +180,56 @@ def sum_recovery_pnl_filtered(
     return {"recovery_pnl": round(total_rec, 2), "true_recovery_pnl": round(total_true, 2)}
 
 
+def recovery_summary_by_ticker(ticker_to_tids: dict) -> list:
+    """Return per-ticker recovery summary for a specific set of trade IDs.
+
+    *ticker_to_tids* maps ``TICKER -> [trade_id, ...]`` for the trades that
+    fall within the caller's date window.  Only assignments whose ``trade_id``
+    is in the caller's set are counted, so the result respects whatever filter
+    the caller applied upstream.
+
+    Each returned row::
+
+        {ticker, num_assignments, assigned_qty, dismissed_qty,
+         recovered_qty, remaining_qty, pct_complete,
+         recovery_pnl, true_recovery_pnl, is_complete}
+    """
+    result = []
+    for ticker, tids in ticker_to_tids.items():
+        data = compute_recovery(ticker)
+        tid_set = set(tids)
+        relevant = [a for a in data.get("assignments", [])
+                    if a["trade_id"] in tid_set]
+        if not relevant:
+            continue
+
+        total_assigned  = sum(a["assigned_qty"] for a in relevant)
+        total_dismissed = sum((a.get("dismissed_qty") or 0) for a in relevant)
+        total_recovered = sum(a["recovered_qty"] for a in relevant)
+        total_remaining = sum(a["remaining_qty"] for a in relevant)
+        total_rec_pnl   = round(sum(a["recovery_pnl"] for a in relevant), 2)
+        total_true_pnl  = round(sum(a["true_recovery_pnl"] for a in relevant), 2)
+        effective       = total_assigned - total_dismissed
+        pct             = round(100 * total_recovered / effective) if effective > 0 else 100
+
+        result.append({
+            "ticker":            ticker,
+            "num_assignments":   len(relevant),
+            "assigned_qty":      total_assigned,
+            "dismissed_qty":     total_dismissed,
+            "recovered_qty":     int(round(total_recovered)),
+            "remaining_qty":     int(round(total_remaining)),
+            "pct_complete":      pct,
+            "recovery_pnl":      total_rec_pnl,
+            "true_recovery_pnl": total_true_pnl,
+            "is_complete":       total_remaining <= 0,
+        })
+
+    # Sort: incomplete first (most remaining shares first), then complete
+    result.sort(key=lambda r: (r["is_complete"], -r["remaining_qty"]))
+    return result
+
+
 def attach_recovery_summaries(trades: list) -> None:
     """Mutate trade dicts in place with recovery_recovered, recovery_target, recovery_pnl for assigned rows."""
     assigned = [

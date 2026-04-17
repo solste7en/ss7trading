@@ -5,10 +5,15 @@ import threading
 
 from flask import Blueprint, jsonify, request
 
-from core.db import dismiss_recovery, get_income_stats, get_income_trades
+from core.db import dismiss_recovery, get_income_stats, get_income_trade_ids_filtered, get_income_trades
 from core.income_range import resolve_income_date_range
 from services.income_sync import run_sync as run_income_sync
-from services.recovery import attach_recovery_summaries, compute_recovery, sum_recovery_pnl_filtered
+from services.recovery import (
+    attach_recovery_summaries,
+    compute_recovery,
+    recovery_summary_by_ticker,
+    sum_recovery_pnl_filtered,
+)
 
 log = logging.getLogger(__name__)
 bp = Blueprint("income", __name__)
@@ -89,6 +94,31 @@ def api_income_recovery():
         if not ticker:
             return jsonify({"error": "ticker is required"}), 400
         return jsonify(compute_recovery(ticker))
+    except Exception as e:
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/income/recovery-summary")
+def api_income_recovery_summary():
+    """Per-ticker recovery progress summary, filtered by the same date window
+    used elsewhere in the income P&L tab."""
+    try:
+        ticker = request.args.get("ticker", "").strip().upper()
+        strategy = request.args.get("strategy", "").strip()
+        outcome = request.args.get("outcome", "").strip()
+        date_from, date_to = _income_date_bounds_from_request()
+
+        rows = get_income_trade_ids_filtered(ticker, "assigned", strategy, outcome,
+                                             date_from, date_to)
+        ticker_to_tids: dict = {}
+        for r in rows:
+            u = (r.get("underlying") or "").upper()
+            if u:
+                ticker_to_tids.setdefault(u, []).append(r["id"])
+
+        summary = recovery_summary_by_ticker(ticker_to_tids)
+        return jsonify({"summary": summary})
     except Exception as e:
         log.exception("API error")
         return jsonify({"error": str(e)}), 500

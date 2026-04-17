@@ -62,8 +62,17 @@ export function _updateIpSortArrows() {
 export async function _fetchRecovery(ticker) {
   if (S._ipRecoveryCache[ticker]) return S._ipRecoveryCache[ticker];
   try {
-    const res = await fetch('/api/income/recovery?ticker=' + encodeURIComponent(ticker)).then(r => r.json());
-    if (!res.error) S._ipRecoveryCache[ticker] = res;
+    const response = await fetch('/api/income/recovery?ticker=' + encodeURIComponent(ticker));
+    if (!response.ok) {
+      console.error(`Recovery fetch for ${ticker} failed: HTTP ${response.status}`);
+      return null;
+    }
+    const res = await response.json();
+    if (res.error) {
+      console.error(`Recovery fetch for ${ticker} returned error:`, res.error);
+      return null;
+    }
+    S._ipRecoveryCache[ticker] = res;
     return res;
   } catch (e) { console.error('Recovery fetch error:', e); return null; }
 }
@@ -202,11 +211,16 @@ export async function loadIncomeTrades(resetPage = true) {
     document.getElementById('ip-count').textContent = res.total + ' trades';
 
     const tickersNeedRec = [...new Set((res.data || []).filter(t => t.status === 'assigned').map(t => t.underlying))];
+    // Invalidate cached recovery data for these tickers so each reload picks up
+    // fresh backend state (important after CLI/background syncs that the UI
+    // doesn't know about).
+    tickersNeedRec.forEach(tk => { delete S._ipRecoveryCache[tk]; });
     await Promise.all(tickersNeedRec.map(u => _fetchRecovery(u)));
 
     _renderIncomeTrades(res.data);
     _updateIpSortArrows();
     window.renderPagination('ip-pagination', res, loadIncomeTrades, S.incomePnlState);
+    if (_recDashOpen) loadRecoverySummary();
   } catch (e) {
     document.getElementById('ip-loading').style.display = 'none';
     document.getElementById('ip-error').textContent = 'Error: ' + e.message;
@@ -321,10 +335,9 @@ export async function toggleIncomeTrade(id, ticker, status) {
     S._ipExpanded.delete(id);
   } else {
     S._ipExpanded.add(id);
-    if (status === 'assigned' && ticker && !S._ipRecoveryCache[ticker]) {
-      await _fetchRecovery(ticker);
-    }
   }
+  // loadIncomeTrades invalidates and refetches recovery for visible tickers,
+  // so we don't need to manage the cache here.
   loadIncomeTrades(false);
 }
 
@@ -445,6 +458,101 @@ export function _renderRecoverySection(rec, ticker) {
   }
 
   return html;
+}
+
+// ── Recovery Dashboard ──────────────────────────────────────────────────
+
+let _recDashOpen = false;
+
+export function toggleRecoverySummary() {
+  _recDashOpen = !_recDashOpen;
+  const panel = document.getElementById('ip-rec-dash');
+  const arrow = document.getElementById('ip-rec-dash-arrow');
+  if (!panel || !arrow) return;
+  panel.style.display = _recDashOpen ? '' : 'none';
+  arrow.textContent = _recDashOpen ? '▼' : '▶';
+  if (_recDashOpen) loadRecoverySummary();
+}
+
+export async function loadRecoverySummary() {
+  const body  = document.getElementById('ip-rec-dash-body');
+  const loading = document.getElementById('ip-rec-dash-loading');
+  const err   = document.getElementById('ip-rec-dash-error');
+  const count = document.getElementById('ip-rec-dash-count');
+  if (!body) return;
+
+  loading.style.display = '';
+  err.style.display = 'none';
+  body.innerHTML = '';
+
+  const params = new URLSearchParams();
+  const tickerEl = document.getElementById('ip-ticker');
+  const strategyEl = document.getElementById('ip-strategy');
+  if (tickerEl && tickerEl.value) params.set('ticker', tickerEl.value.trim().toUpperCase());
+  if (strategyEl && strategyEl.value) params.set('strategy', strategyEl.value);
+  _ipAppendDateRangeParams(params);
+
+  try {
+    const res = await fetch('/api/income/recovery-summary?' + params).then(r => r.json());
+    loading.style.display = 'none';
+    if (res.error) throw new Error(res.error);
+
+    const rows = res.summary || [];
+    if (count) count.textContent = rows.length ? `${rows.length} ticker${rows.length > 1 ? 's' : ''}` : '';
+
+    if (!rows.length) {
+      body.innerHTML = '<div class="ip-rec-dash-empty">No assigned trades with recovery activity in this window.</div>';
+      return;
+    }
+
+    body.innerHTML = `
+      <table class="ip-rec-dash-tbl">
+        <thead><tr>
+          <th>Ticker</th>
+          <th title="Number of assigned trades in the selected window">Assignments</th>
+          <th>Assigned Shares</th>
+          <th>Recovered</th>
+          <th>Remaining</th>
+          <th>Progress</th>
+          <th title="Recovery P&L vs strike price">Rec. P&L</th>
+          <th title="True P&L vs assignment stock price">True P&L</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => {
+            const pct = r.pct_complete;
+            const recPnl = r.recovery_pnl;
+            const truPnl = r.true_recovery_pnl;
+            const recCls  = recPnl  >= 0 ? 'pos' : 'neg';
+            const truCls  = truPnl  >= 0 ? 'pos' : 'neg';
+            const fmtPnl  = v => (v >= 0 ? '+' : '') + '$' + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const statusBadge = r.is_complete
+              ? '<span class="ip-badge ip-rec-dash-done">Complete</span>'
+              : '<span class="ip-badge ip-rec-dash-progress">In Progress</span>';
+            return `<tr>
+              <td><strong>${esc(r.ticker)}</strong></td>
+              <td>${r.num_assignments}</td>
+              <td>${r.assigned_qty.toLocaleString()}</td>
+              <td>${r.recovered_qty.toLocaleString()}</td>
+              <td class="${r.remaining_qty > 0 ? 'ip-rec-dash-remaining' : ''}">${r.remaining_qty > 0 ? r.remaining_qty.toLocaleString() : '—'}</td>
+              <td class="ip-rec-dash-bar-cell">
+                <div class="ip-rec-dash-bar-wrap">
+                  <div class="ip-rec-dash-bar-fill" style="width:${Math.min(pct,100)}%"></div>
+                </div>
+                <span class="ip-rec-dash-pct">${pct}%</span>
+              </td>
+              <td class="${recCls}">${fmtPnl(recPnl)}</td>
+              <td class="${truCls}">${fmtPnl(truPnl)}</td>
+              <td>${statusBadge}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    loading.style.display = 'none';
+    err.textContent = 'Error: ' + e.message;
+    err.style.display = '';
+  }
 }
 
 export async function syncIncome() {
