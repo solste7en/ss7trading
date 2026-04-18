@@ -179,6 +179,8 @@ export async function loadIncomeStats() {
     } else {
       document.getElementById('ip-last-sync').textContent = 'Not synced yet';
     }
+
+    await loadIncomeTimeseries();
   } catch (e) {
     console.error('Income stats error:', e);
   }
@@ -458,6 +460,176 @@ export function _renderRecoverySection(rec, ticker) {
   }
 
   return html;
+}
+
+// ── Income weekly chart (premium bars + cumulative P&L line) ───────────
+
+let _ipTsChart = null;
+
+function _ipTsCssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function _destroyIpTsChart() {
+  if (_ipTsChart) {
+    _ipTsChart.destroy();
+    _ipTsChart = null;
+  }
+}
+
+function _ipTsFmt$(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  const s = Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return (n < 0 ? '-$' : '$') + s;
+}
+
+export async function loadIncomeTimeseries() {
+  const canvas = document.getElementById('ip-timeseries-chart');
+  const empty = document.getElementById('ip-chart-empty');
+  const wrap = document.querySelector('#ip-chart-panel .ip-chart-canvas-wrap');
+  const sub = document.getElementById('ip-chart-sub');
+  if (!canvas || typeof Chart === 'undefined') return;
+
+  const ticker = document.getElementById('ip-ticker').value.trim().toUpperCase();
+  const status = document.getElementById('ip-status').value;
+  const strategy = document.getElementById('ip-strategy').value;
+  const params = new URLSearchParams();
+  if (ticker) params.set('ticker', ticker);
+  if (status) params.set('status', status);
+  if (strategy) params.set('strategy', strategy);
+  if (S._ipCardFilter) params.set('outcome', S._ipCardFilter);
+  _ipAppendDateRangeParams(params);
+
+  try {
+    const data = await fetch('/api/income/timeseries?' + params).then(r => r.json());
+    if (data.error) throw new Error(data.error);
+
+    const weeks = data.week_starts || [];
+    if (!weeks.length) {
+      _destroyIpTsChart();
+      if (empty) {
+        empty.textContent = 'No trades in this window.';
+        empty.style.display = '';
+      }
+      if (wrap) wrap.style.display = 'none';
+      if (sub) sub.textContent = '';
+      return;
+    }
+    if (empty) {
+      empty.textContent = 'No trades in this window.';
+      empty.style.display = 'none';
+    }
+    if (wrap) wrap.style.display = '';
+
+    if (sub) {
+      if (data.date_from && data.date_to) {
+        sub.textContent = data.date_from + ' → ' + data.date_to;
+      } else {
+        sub.textContent = 'All dates · weeks with activity';
+      }
+    }
+
+    const labels = weeks.map(w => {
+      const d = new Date(w + 'T12:00:00');
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    });
+
+    const accent = _ipTsCssVar('--color-accent') || '#6366f1';
+    const pos = _ipTsCssVar('--color-pos') || '#34d399';
+    const text = _ipTsCssVar('--color-text-secondary') || '#94a3b8';
+    const grid = _ipTsCssVar('--color-border-subtle') || '#1e2235';
+
+    _destroyIpTsChart();
+    const ctx = canvas.getContext('2d');
+    _ipTsChart = new Chart(ctx, {
+      data: {
+        labels,
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Weekly Sum Net P&L',
+            data: data.weekly_sum_net || [],
+            yAxisID: 'y',
+            backgroundColor: accent + 'aa',
+            borderRadius: 3,
+            order: 1,
+          },
+          {
+            type: 'line',
+            label: 'Cumulative Sum Net P&L',
+            data: data.cumulative_sum_net || [],
+            yAxisID: 'y1',
+            borderColor: pos,
+            backgroundColor: pos + '18',
+            borderWidth: 2,
+            tension: 0.25,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            fill: false,
+            order: 2,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            labels: { color: text, font: { size: 11 }, boxWidth: 12, padding: 10 },
+          },
+          tooltip: {
+            callbacks: {
+              label: (c) => {
+                const v = c.raw;
+                return `${c.dataset.label}: ${_ipTsFmt$(v)}`;
+              },
+              afterBody: (items) => {
+                if (!items.length) return [];
+                const idx = items[0].dataIndex;
+                const o = data.weekly_option_pnl?.[idx];
+                const r = data.weekly_recovery_pnl?.[idx];
+                if (o == null && r == null) return [];
+                const lines = [];
+                if (o != null) lines.push(`Option (week): ${_ipTsFmt$(o)}`);
+                if (r != null) lines.push(`Recovery (week): ${_ipTsFmt$(r)}`);
+                return lines;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: text, maxRotation: 45, font: { size: 10 }, maxTicksLimit: 16 },
+            grid: { color: grid },
+          },
+          y: {
+            position: 'left',
+            title: { display: true, text: 'Weekly Sum Net P&L', color: text, font: { size: 10 } },
+            ticks: { color: text, callback: v => _ipTsFmt$(v) },
+            grid: { color: grid },
+          },
+          y1: {
+            position: 'right',
+            title: { display: true, text: 'Cumulative Sum Net P&L', color: text, font: { size: 10 } },
+            ticks: { color: text, callback: v => _ipTsFmt$(v) },
+            grid: { drawOnChartArea: false },
+          },
+        },
+      },
+    });
+  } catch (e) {
+    console.error('Income timeseries error:', e);
+    _destroyIpTsChart();
+    if (empty) {
+      empty.textContent = 'Could not load chart.';
+      empty.style.display = '';
+    }
+    if (wrap) wrap.style.display = 'none';
+  }
 }
 
 // ── Recovery Dashboard ──────────────────────────────────────────────────

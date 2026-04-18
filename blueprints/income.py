@@ -5,7 +5,13 @@ import threading
 
 from flask import Blueprint, jsonify, request
 
-from core.db import dismiss_recovery, get_income_stats, get_income_trade_ids_filtered, get_income_trades
+from core.db import (
+    dismiss_recovery,
+    get_income_stats,
+    get_income_trade_ids_filtered,
+    get_income_trades,
+    get_income_weekly_timeseries,
+)
 from core.income_range import resolve_income_date_range
 from services.income_sync import run_sync as run_income_sync
 from services.recovery import (
@@ -94,6 +100,26 @@ def api_income_recovery():
         if not ticker:
             return jsonify({"error": "ticker is required"}), 400
         return jsonify(compute_recovery(ticker))
+    except Exception as e:
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/income/timeseries")
+def api_income_timeseries():
+    """Weekly premium volume + cumulative realized option P&L for the chart.
+
+    Uses the same ``range`` / ``date_from`` / ``date_to`` / filters as stats."""
+    try:
+        ticker = request.args.get("ticker", "").strip().upper()
+        status = request.args.get("status", "").strip()
+        strategy = request.args.get("strategy", "").strip()
+        outcome = request.args.get("outcome", "").strip()
+        date_from, date_to = _income_date_bounds_from_request()
+        data = get_income_weekly_timeseries(
+            ticker, status, strategy, outcome, date_from, date_to
+        )
+        return jsonify(data)
     except Exception as e:
         log.exception("API error")
         return jsonify({"error": str(e)}), 500

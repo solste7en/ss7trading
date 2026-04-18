@@ -301,6 +301,16 @@
     </div>
   </div>
 
+  <!-- Weekly income volume (bars) + cumulative option P&L (line); x-axis matches date range -->
+  <div class="ip-chart-panel" id="ip-chart-panel">
+    <div class="ip-chart-head">
+      <h3 class="ip-chart-title">Income over time</h3>
+      <span class="ip-chart-sub" id="ip-chart-sub"></span>
+    </div>
+    <div id="ip-chart-empty" class="ip-chart-empty" style="display:none">No trades in this window.</div>
+    <div class="ip-chart-canvas-wrap"><canvas id="ip-timeseries-chart" height="200"></canvas></div>
+  </div>
+
   <!-- Trades table -->
   <div class="loading" id="ip-loading">Loading…</div>
   <div id="ip-error" class="error" style="display:none"></div>

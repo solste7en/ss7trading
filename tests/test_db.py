@@ -10,6 +10,76 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from core.db import _income_trades_where
 
+# ── get_income_weekly_timeseries ─────────────────────────────────────────────
+
+
+class TestIncomeWeeklyTimeseries:
+    @pytest.fixture
+    def income_ts_db(self, tmp_path, monkeypatch):
+        import core.db as db_mod
+
+        monkeypatch.setattr(db_mod, "DB_PATH", str(tmp_path / "income_ts.db"))
+        with db_mod._connection() as conn:
+            db_mod._ensure_income_tables(conn)
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO income_trades (
+                    underlying, strategy, open_date, close_date, status, days_held,
+                    net_premium, close_cost, fees, net_pnl, net_pnl_pct, is_win, is_perfect_win,
+                    dedup_key
+                ) VALUES
+                ('NVDA','put_spread','2026-01-02','2026-01-08','closed',6,400,0,0,100,0,1,0,'u1'),
+                ('NVDA','put_spread','2026-01-20','2026-01-22','closed',2,300,0,0,-50,0,0,0,'u2')
+                """
+            )
+            conn.commit()
+        return tmp_path
+
+    def test_fills_week_axis_and_cumulative(self, income_ts_db):
+        from core.db import get_income_weekly_timeseries
+
+        out = get_income_weekly_timeseries(date_from="2026-01-06", date_to="2026-01-26")
+        assert out["week_starts"]
+        assert len(out["week_starts"]) == len(out["weekly_sum_net"])
+        assert len(out["cumulative_sum_net"]) == len(out["weekly_sum_net"])
+        i0 = out["week_starts"].index("2026-01-05")
+        i1 = out["week_starts"].index("2026-01-19")
+        assert out["weekly_option_pnl"][i0] == 100.0
+        assert out["weekly_recovery_pnl"][i0] == 0.0
+        assert out["weekly_sum_net"][i0] == 100.0
+        assert out["weekly_option_pnl"][i1] == -50.0
+        assert out["weekly_recovery_pnl"][i1] == 0.0
+        assert out["weekly_sum_net"][i1] == -50.0
+        assert out["cumulative_sum_net"][-1] == 50.0
+
+    def test_open_trade_zero_realized_pnl(self, tmp_path, monkeypatch):
+        import core.db as db_mod
+
+        monkeypatch.setattr(db_mod, "DB_PATH", str(tmp_path / "income_open.db"))
+        with db_mod._connection() as conn:
+            db_mod._ensure_income_tables(conn)
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO income_trades (
+                    underlying, strategy, open_date, close_date, status, days_held,
+                    net_premium, close_cost, fees, net_pnl, net_pnl_pct, is_win, is_perfect_win,
+                    dedup_key
+                ) VALUES ('AAPL','naked_put','2026-02-02',NULL,'open',0,250,0,0,NULL,0,0,0,'o1')
+                """
+            )
+            conn.commit()
+        from core.db import get_income_weekly_timeseries
+
+        out = get_income_weekly_timeseries(date_from="2026-02-01", date_to="2026-02-28")
+        i = out["week_starts"].index("2026-02-02")
+        assert out["weekly_option_pnl"][i] == 0.0
+        assert out["weekly_recovery_pnl"][i] == 0.0
+        assert out["weekly_sum_net"][i] == 0.0
+        assert out["cumulative_sum_net"][i] == 0.0
+
+
 # ── _income_trades_where ──────────────────────────────────────────────────────
 
 class TestIncomeTradesWhere:

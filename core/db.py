@@ -6,7 +6,7 @@ import math
 import sqlite3
 from collections import defaultdict
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from core.config import DB_PATH
 
@@ -1461,6 +1461,123 @@ def get_income_stats(ticker="", status="", strategy="", outcome="", date_from=""
     row["open_premium"] = round(row["open_premium"] or 0, 2)
     row["last_synced"] = get_income_sync_time()
     return row
+
+
+def _income_week_monday(eff: str) -> date:
+    """Return the Monday (ISO week start) of the calendar week containing *eff*."""
+    d = date.fromisoformat(eff[:10])
+    return d - timedelta(days=d.weekday())
+
+
+def get_income_weekly_timeseries(
+    ticker="",
+    status="",
+    strategy="",
+    outcome="",
+    date_from="",
+    date_to="",
+):
+    """Weekly buckets aligned with Income KPI **Sum Net P&L** (option + recovery).
+
+    Each trade is placed in the Monday week of its effective date
+    (``COALESCE(NULLIF(TRIM(close_date), ''), open_date)``) — same as
+    ``_income_trades_where``.
+
+    Per trade, the week receives the same components the dashboard uses for
+    **Sum Net P&L**:
+
+    * **Option leg:** ``net_pnl`` when ``status != 'open'`` (matches
+      ``get_income_stats`` ``total_pnl``); open trades contribute ``0``.
+    * **Recovery:** ``true_recovery_pnl`` after ``attach_recovery_summaries``
+      (assigned, non–fully-exercised rows only; others ``0``).
+
+    Returns::
+
+        week_starts: ISO Mondays, ascending
+        weekly_sum_net: bar height = sum(option + recovery) in that week
+        weekly_option_pnl: option-only portion (same week)
+        weekly_recovery_pnl: true recovery portion (same week)
+        cumulative_sum_net: running sum of ``weekly_sum_net`` (line)
+    """
+    from services.recovery import attach_recovery_summaries
+
+    wfrag, params = _income_trades_where(ticker, status, strategy, outcome, "t", date_from, date_to)
+    clause = ("WHERE " + " AND ".join(wfrag)) if wfrag else ""
+
+    with _connection() as conn:
+        _ensure_income_tables(conn)
+        cur = conn.cursor()
+        cur.execute(f"SELECT t.* FROM income_trades t {clause}", params)
+        trades = [dict(r) for r in cur.fetchall()]
+        _income_attach_legs(cur, trades)
+
+    attach_recovery_summaries(trades)
+
+    opt_by_week: dict[date, float] = defaultdict(float)
+    rec_by_week: dict[date, float] = defaultdict(float)
+
+    for t in trades:
+        eff = (t.get("close_date") or "").strip()
+        if not eff:
+            eff = (t.get("open_date") or "").strip()
+        if not eff or len(eff) < 10:
+            continue
+        try:
+            wk = _income_week_monday(eff)
+        except ValueError:
+            continue
+        st = (t.get("status") or "").strip()
+        opt = float(t.get("net_pnl") or 0) if st != "open" else 0.0
+        rec = float(t.get("true_recovery_pnl") or 0)
+        opt_by_week[wk] += opt
+        rec_by_week[wk] += rec
+
+    week_keys = set(opt_by_week) | set(rec_by_week)
+
+    df_s = (date_from or "").strip()
+    dt_s = (date_to or "").strip()
+
+    if df_s and dt_s:
+        try:
+            d0 = date.fromisoformat(df_s[:10])
+            d1 = date.fromisoformat(dt_s[:10])
+        except ValueError:
+            d0, d1 = None, None
+        if d0 and d1 and d0 > d1:
+            d0, d1 = d1, d0
+        if d0 and d1:
+            axis_start = _income_week_monday(d0.isoformat())
+            axis_end = _income_week_monday(d1.isoformat())
+            weeks = []
+            cur_w = axis_start
+            while cur_w <= axis_end:
+                weeks.append(cur_w)
+                cur_w += timedelta(days=7)
+        else:
+            weeks = sorted(week_keys)
+    else:
+        weeks = sorted(week_keys)
+
+    raw_weekly = [opt_by_week.get(w, 0.0) + rec_by_week.get(w, 0.0) for w in weeks]
+    weekly_option = [round(opt_by_week.get(w, 0.0), 2) for w in weeks]
+    weekly_recovery = [round(rec_by_week.get(w, 0.0), 2) for w in weeks]
+    weekly_sum_net = [round(x, 2) for x in raw_weekly]
+
+    cum = []
+    running = 0.0
+    for x in raw_weekly:
+        running += x
+        cum.append(round(running, 2))
+
+    return {
+        "week_starts": [w.isoformat() for w in weeks],
+        "weekly_sum_net": weekly_sum_net,
+        "weekly_option_pnl": weekly_option,
+        "weekly_recovery_pnl": weekly_recovery,
+        "cumulative_sum_net": cum,
+        "date_from": df_s or None,
+        "date_to": dt_s or None,
+    }
 
 
 def dismiss_recovery(trade_id, qty):
