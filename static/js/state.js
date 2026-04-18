@@ -43,6 +43,10 @@ export const store = {
   _tradeQuoteData: null,
 
   _chainData: null,
+  /** Trade-tab option chain maps (full expiry slice; strike dropdown + table stay aligned). */
+  _tradeChainCallMap: {},
+  _tradeChainPutMap: {},
+  _tradeChainAllStrikes: [],
 
   ladderRungs: [{ qty: '', price: '' }, { qty: '', price: '' }],
   _ladderSubmitting: false,

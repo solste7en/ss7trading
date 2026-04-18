@@ -1,5 +1,6 @@
 import { fmt, fmtD, cls, esc, fetchJson } from './utils.js';
 import { store as S } from './state.js';
+import { findChainContract, makeStrikeSelectOptions } from './optionChainHelpers.js';
 
 export function setTradeMode(mode) {
   S.tradeMode = mode;
@@ -151,6 +152,19 @@ export function onTradeTickerChange() {
     clearPositionPanel('trade-position-panel');
     resetTradeQuotePlaceholder();
     resetTradeChartPlaceholder();
+    const chainSel = document.getElementById('chain-expiry');
+    const optSel = document.getElementById('opt-expiry');
+    if (chainSel) chainSel.innerHTML = '<option value="">Select expiration</option>';
+    if (optSel) optSel.innerHTML = '<option value="">— enter ticker first —</option>';
+    clearTradeChainState();
+    resetTradeStrikeSelectPlaceholder();
+    const chainContent = document.getElementById('chain-content');
+    if (chainContent) {
+      chainContent.innerHTML =
+        '<div style="color:#475569;font-size:12px;padding:8px 0">Select an expiration to view the option chain</div>';
+    }
+    const chainStatus = document.getElementById('chain-status');
+    if (chainStatus) chainStatus.textContent = '';
     return;
   }
   const changed = ticker !== S._tradeTicker;
@@ -170,6 +184,104 @@ export function updateEqFields() {
 export function updateOptFields() {
   const ot = document.getElementById('opt-order-type').value;
   document.getElementById('opt-price-group').style.display = ot === 'limit' ? '' : 'none';
+  if (ot === 'limit') autoCalcTradeOptPrice();
+}
+
+function clearTradeChainState() {
+  S._chainData = null;
+  S._tradeChainCallMap = {};
+  S._tradeChainPutMap = {};
+  S._tradeChainAllStrikes = [];
+}
+
+function resetTradeStrikeSelectPlaceholder() {
+  const sel = document.getElementById('opt-strike');
+  if (sel) sel.innerHTML = '<option value="">— select expiration first —</option>';
+}
+
+function resetTradeChainAfterExpirationsList() {
+  clearTradeChainState();
+  const content = document.getElementById('chain-content');
+  if (content) {
+    content.innerHTML =
+      '<div style="color:#475569;font-size:12px;padding:8px 0">Select an expiration to load the option chain</div>';
+  }
+  const status = document.getElementById('chain-status');
+  if (status) status.textContent = '';
+  resetTradeStrikeSelectPlaceholder();
+}
+
+/** Keep form expiration and chain header in sync, then load chain (same as Strategy tab flow). */
+export function onTradeExpiryChange(ev) {
+  const optEl = document.getElementById('opt-expiry');
+  const chainEl = document.getElementById('chain-expiry');
+  const from = ev && ev.target;
+  const v = from && (from.id === 'opt-expiry' || from.id === 'chain-expiry')
+    ? from.value
+    : optEl.value;
+  if (optEl.value !== v) optEl.value = v;
+  if (chainEl.value !== v) chainEl.value = v;
+  if (!v || !S._tradeTicker) {
+    const content = document.getElementById('chain-content');
+    if (content) {
+      content.innerHTML =
+        '<div style="color:#475569;font-size:12px;padding:8px 0">Select an expiration to view the option chain</div>';
+    }
+    const status = document.getElementById('chain-status');
+    if (status) status.textContent = '';
+    clearTradeChainState();
+    resetTradeStrikeSelectPlaceholder();
+    return;
+  }
+  loadOptionChain();
+}
+
+export function populateTradeStrikeDropdown() {
+  const sel = document.getElementById('opt-strike');
+  if (!sel) return;
+  const type = document.getElementById('opt-type').value;
+  const prev = sel.value;
+  if (!S._tradeChainAllStrikes.length) {
+    sel.innerHTML = '<option value="">— select expiration first —</option>';
+    return;
+  }
+  sel.innerHTML = makeStrikeSelectOptions(
+    type,
+    S._tradeChainCallMap,
+    S._tradeChainPutMap,
+    S._tradeChainAllStrikes,
+    prev,
+    null,
+  );
+}
+
+/** Prefill limit price from chain: sell → bid, buy → ask (matches Strategy naked leg). */
+export function autoCalcTradeOptPrice() {
+  if (!S._chainData) return;
+  const expiry = document.getElementById('opt-expiry').value;
+  if (!expiry) return;
+  const type = document.getElementById('opt-type').value;
+  const strike = document.getElementById('opt-strike').value;
+  const c = findChainContract(S._chainData, type, strike, expiry);
+  if (!c) return;
+  const action = document.getElementById('opt-action').value;
+  const isSell = action.startsWith('sell');
+  const price = isSell
+    ? (c.bid != null ? c.bid : null)
+    : (c.ask != null ? c.ask : null);
+  const ot = document.getElementById('opt-order-type').value;
+  if (ot === 'limit' && price != null) {
+    document.getElementById('opt-price').value = Number(price).toFixed(2);
+  }
+}
+
+export function onTradeStrikeChange() {
+  autoCalcTradeOptPrice();
+}
+
+export function onTradeOptContextChange() {
+  populateTradeStrikeDropdown();
+  autoCalcTradeOptPrice();
 }
 
 export async function loadTradeQuote(ticker) {
@@ -272,19 +384,29 @@ export function loadTradingViewChart(ticker) {
 }
 
 export async function loadOptionExpirations(ticker) {
-  const sel = document.getElementById('chain-expiry');
-  sel.innerHTML = '<option value="">Loading expirations…</option>';
+  const chainSel = document.getElementById('chain-expiry');
+  const optSel = document.getElementById('opt-expiry');
+  const loading = '<option value="">Loading expirations…</option>';
+  chainSel.innerHTML = loading;
+  optSel.innerHTML = loading;
+  resetTradeChainAfterExpirationsList();
   try {
     const data = await fetch('/api/option-expirations/' + encodeURIComponent(ticker)).then(r => r.json());
     if (data.error) throw new Error(data.error);
     if (!data.expirations || !data.expirations.length) {
-      sel.innerHTML = '<option value="">No expirations found</option>';
+      const empty = '<option value="">No expirations found</option>';
+      chainSel.innerHTML = empty;
+      optSel.innerHTML = empty;
       return;
     }
-    sel.innerHTML = '<option value="">Select expiration (' + data.expirations.length + ' available)</option>' +
+    const opts = '<option value="">Select expiration (' + data.expirations.length + ' available)</option>' +
       data.expirations.map(d => '<option value="' + d + '">' + d + '</option>').join('');
+    chainSel.innerHTML = opts;
+    optSel.innerHTML = opts;
   } catch(e) {
-    sel.innerHTML = '<option value="">Error loading expirations</option>';
+    const err = '<option value="">Error loading expirations</option>';
+    chainSel.innerHTML = err;
+    optSel.innerHTML = err;
   }
 }
 
@@ -294,27 +416,35 @@ export async function loadOptionChain() {
   const status  = document.getElementById('chain-status');
   if (!expiry || !S._tradeTicker) {
     content.innerHTML = '<div style="color:#475569;font-size:12px;padding:8px 0">Select an expiration to view the option chain</div>';
+    clearTradeChainState();
+    resetTradeStrikeSelectPlaceholder();
     return;
   }
   status.textContent = 'Loading…';
   content.innerHTML = '<div class="loading" style="padding:16px">Loading option chain…</div>';
   try {
     const data = await fetch('/api/option-chain?symbol=' + encodeURIComponent(S._tradeTicker) +
-      '&from_date=' + expiry + '&to_date=' + expiry + '&strike_count=20').then(r => r.json());
+      '&from_date=' + expiry + '&to_date=' + expiry + '&strike_count=60').then(r => r.json());
     if (data.error) throw new Error(data.error);
     S._chainData = data;
 
     const calls = data.calls[expiry] || [];
     const puts  = data.puts[expiry]  || [];
     const strikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])].sort((a,b) => a - b);
-    const callMap = {}; calls.forEach(c => callMap[c.strike] = c);
-    const putMap  = {}; puts.forEach(p => putMap[p.strike] = p);
+    const callMap = {}; calls.forEach(c => { callMap[c.strike] = c; });
+    const putMap  = {}; puts.forEach(p => { putMap[p.strike] = p; });
 
     if (!strikes.length) {
       content.innerHTML = '<div style="color:#475569;font-size:12px;padding:8px 0">No contracts found for this expiration</div>';
       status.textContent = '';
+      clearTradeChainState();
+      resetTradeStrikeSelectPlaceholder();
       return;
     }
+
+    S._tradeChainCallMap = callMap;
+    S._tradeChainPutMap = putMap;
+    S._tradeChainAllStrikes = strikes;
 
     const fmtOpt = v => v == null ? '—' : Number(v).toFixed(2);
     const fmtVol = v => v == null ? '—' : Number(v).toLocaleString();
@@ -355,9 +485,14 @@ export async function loadOptionChain() {
       '<tbody>' + rows + '</tbody></table>' +
       '<div class="chain-click-hint">Click any call or put row to fill the option order form</div>';
     status.textContent = strikes.length + ' strikes';
+
+    populateTradeStrikeDropdown();
+    autoCalcTradeOptPrice();
   } catch(e) {
     content.innerHTML = '<div style="color:#f87171;font-size:12px;padding:8px 0">Error: ' + esc(e.message) + '</div>';
     status.textContent = '';
+    clearTradeChainState();
+    resetTradeStrikeSelectPlaceholder();
   }
 }
 
@@ -369,17 +504,14 @@ export function onChainClick(e) {
   const expiry = document.getElementById('chain-expiry').value;
   if (!side || !strike || !expiry || !S._chainData) return;
 
-  const contracts = side === 'CALL' ? (S._chainData.calls[expiry] || []) : (S._chainData.puts[expiry] || []);
-  const contract = contracts.find(c => c.strike === strike);
-  const mid = contract && contract.bid != null && contract.ask != null
-    ? ((contract.bid + contract.ask) / 2).toFixed(2) : '';
-
-  document.getElementById('opt-type').value    = side;
-  document.getElementById('opt-expiry').value   = expiry;
-  document.getElementById('opt-strike').value   = strike;
-  document.getElementById('opt-price').value    = mid;
+  document.getElementById('opt-type').value = side;
+  document.getElementById('opt-expiry').value = expiry;
+  document.getElementById('chain-expiry').value = expiry;
+  populateTradeStrikeDropdown();
+  document.getElementById('opt-strike').value = String(strike);
   document.getElementById('opt-order-type').value = 'limit';
   updateOptFields();
+  autoCalcTradeOptPrice();
 
   document.getElementById('form-option').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

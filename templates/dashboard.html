@@ -393,6 +393,7 @@
           <div class="form-group">
             <label>Ticker</label>
             <input type="text" id="eq-ticker" placeholder="NVDA" maxlength="10"
+                   oninput="debounce(onTradeTickerChange)"
                    onkeydown="if(event.key==='Enter') onTradeTickerChange()"
                    onchange="onTradeTickerChange()">
           </div>
@@ -452,19 +453,20 @@
           <div class="form-group">
             <label>Underlying Ticker</label>
             <input type="text" id="opt-underlying" placeholder="NVDA" maxlength="10"
+                   oninput="debounce(onTradeTickerChange)"
                    onkeydown="if(event.key==='Enter') onTradeTickerChange()"
                    onchange="onTradeTickerChange()">
           </div>
           <div class="form-group">
             <label>Option Type</label>
-            <select id="opt-type">
+            <select id="opt-type" onchange="onTradeOptContextChange()">
               <option value="PUT">PUT</option>
               <option value="CALL">CALL</option>
             </select>
           </div>
           <div class="form-group">
             <label>Action</label>
-            <select id="opt-action">
+            <select id="opt-action" onchange="onTradeStrikeChange()">
               <option value="sell_to_open">Sell to Open (short)</option>
               <option value="buy_to_open">Buy to Open (long)</option>
               <option value="buy_to_close">Buy to Close</option>
@@ -473,13 +475,15 @@
           </div>
           <div class="form-group">
             <label>Expiration Date</label>
-            <select id="opt-expiry">
+            <select id="opt-expiry" onchange="onTradeExpiryChange(event)">
               <option value="">— enter ticker first —</option>
             </select>
           </div>
           <div class="form-group">
             <label>Strike Price ($)</label>
-            <input type="number" id="opt-strike" placeholder="170.00" step="0.50" min="0">
+            <select id="opt-strike" onchange="onTradeStrikeChange()">
+              <option value="">— select expiration first —</option>
+            </select>
           </div>
           <div class="form-group">
             <label>Contracts</label>
@@ -523,7 +527,7 @@
         <div class="trade-chain-header">
           <h3>Option Chain</h3>
           <div class="trade-chain-controls">
-            <select id="chain-expiry" onchange="loadOptionChain()">
+            <select id="chain-expiry" onchange="onTradeExpiryChange(event)">
               <option value="">Select expiration</option>
             </select>
             <span id="chain-status" style="font-size:11px;color:#64748b"></span>

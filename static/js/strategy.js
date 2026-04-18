@@ -1,6 +1,7 @@
 import { fmt, fmtD, cls, esc, fetchJson, ladderResultTableHtml, round2 } from './utils.js';
 import { normalizeQty } from './utils.js';
 import { store as S } from './state.js';
+import { findChainContract, makeStrikeSelectOptions } from './optionChainHelpers.js';
 
 export function _stratLadderEnabled() {
   const el = document.getElementById('strat-ladder-en');
@@ -1107,10 +1108,7 @@ export function _buildStrategyPayload() {
 }
 
 export function _findChainContract(type, strike, expiry) {
-  if (!S._stratChainData) return null;
-  const map = type === 'CALL' ? S._stratChainData.calls : S._stratChainData.puts;
-  const contracts = map ? (map[expiry] || []) : [];
-  return contracts.find(c => c.strike === strike) || null;
+  return findChainContract(S._stratChainData, type, strike, expiry);
 }
 
 // Populate all strike <select> elements from the currently loaded chain data.
@@ -1119,21 +1117,14 @@ export function _findChainContract(type, strike, expiry) {
 // page strikes but keeping the currently selected value even if it's off-page
 // (shown as an out-of-range entry so the form doesn't silently clear it).
 export function _makeStrikeOpts(type, currentValue) {
-  const map = type === 'CALL' ? S._chainCallMap : S._chainPutMap;
-  // Strikes to show = visible page; if selected value is outside page, append it
-  let strikes = S._chainVisibleStrikes.slice();
-  const curFloat = parseFloat(currentValue);
-  if (curFloat && !strikes.includes(curFloat)) strikes = [...strikes, curFloat].sort((a,b)=>a-b);
-
-  let html = '<option value="">— select strike —</option>';
-  strikes.forEach(k => {
-    const c   = map[k] || {};
-    const sel = (curFloat === k) ? ' selected' : '';
-    const mid = (c.bid != null && c.ask != null) ? ' · mid ' + ((c.bid + c.ask) / 2).toFixed(2) : '';
-    const outOfPage = !S._chainVisibleStrikes.includes(k) ? ' ◀ off-page' : '';
-    html += `<option value="${k}"${sel}>$${k.toFixed(2)} (bid ${(c.bid || 0).toFixed(2)} / ask ${(c.ask || 0).toFixed(2)}${mid}${outOfPage})</option>`;
-  });
-  return html;
+  return makeStrikeSelectOptions(
+    type,
+    S._chainCallMap,
+    S._chainPutMap,
+    S._chainVisibleStrikes,
+    currentValue,
+    S._chainVisibleStrikes,
+  );
 }
 
 export function _populateStrikeDropdowns() {

@@ -33,6 +33,7 @@ import {
   loadTradeQuote, loadTradingViewChart, loadOptionExpirations,
   loadOptionChain, onChainClick, loadPositionSummaryForTicker,
   clearPositionPanel, syncTradeTicker,
+  onTradeExpiryChange, onTradeOptContextChange, onTradeStrikeChange,
 } from './trade.js';
 import {
   renderRungs, addRung, removeRung, updateLadderSummary,
@@ -88,6 +89,7 @@ Object.assign(window, {
   loadTradeQuote, loadTradingViewChart, loadOptionExpirations,
   loadOptionChain, onChainClick, loadPositionSummaryForTicker,
   clearPositionPanel, syncTradeTicker,
+  onTradeExpiryChange, onTradeOptContextChange, onTradeStrikeChange,
   // ladder
   renderRungs, addRung, removeRung, updateLadderSummary,
   ladderEvenSplit, ladderScaleUp, ladderScaleDown,
