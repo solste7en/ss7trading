@@ -1,5 +1,6 @@
 import { fmt, fmtD, cls, esc, normalizeQty, fetchJson } from './utils.js';
 import { store } from './state.js';
+import { earningsTagHtml, fetchEarningsMap, isEarningsWithinTradingDays } from './earningsUi.js';
 
 export function _overviewTradeRows(trades) {
   if (!trades.length) return '<tr><td colspan="5" style="color:#64748b">No trades found</td></tr>';
@@ -33,6 +34,9 @@ export async function loadOverview() {
     const data = await fetchJson('/api/top-tickers');
     store.overviewState.loaded = true;
 
+    const topSyms = (data.tickers || []).map(t => t.symbol).filter(Boolean);
+    const earnMap = await fetchEarningsMap(topSyms);
+
     const cards = data.tickers.map(t => {
       const countLabel = `${t.trade_count.toLocaleString()} trades `
         + `<span style="color:#475569">(${(t.equity_count||0).toLocaleString()} equity`
@@ -42,9 +46,17 @@ export async function loadOverview() {
       const totalPages = Math.ceil((t.equity_count||0) / store.OVERVIEW_LIMIT);
       const pag = `<div id="tpag-${t.symbol}">${_overviewPag(1, totalPages, t.equity_count||0, p => `loadTickerPage('${t.symbol}',${p})`)}</div>`;
 
-      return `<div class="ticker-card" id="tcard-${t.symbol}">
+      const earnIso = earnMap[String(t.symbol || '').toUpperCase()];
+      const earnSoon = earnIso && isEarningsWithinTradingDays(earnIso, 10);
+      const cardClass = earnSoon ? 'ticker-card ticker-card-earnings-soon' : 'ticker-card';
+      const earnHdr = earnIso
+        ? `<span class="ticker-card-earn-wrap">${earningsTagHtml(earnIso)}</span>`
+        : '';
+
+      return `<div class="${cardClass}" id="tcard-${t.symbol}">
         <div class="ticker-card-header">
           <h3>${esc(t.symbol)}</h3>
+          ${earnHdr}
           <span class="trade-count">${countLabel}</span>
           <button class="btn-ladder" onclick="openLadder('${t.symbol}')">Ladder</button>
         </div>
@@ -130,6 +142,13 @@ export async function loadCustomTickerPage(page) {
     const mainRes = await fetch('/api/transactions?' + new URLSearchParams(mainParams)).then(r => r.json());
     if (mainRes.error) throw new Error(mainRes.error);
 
+    const earnMapOne = await fetchEarningsMap([sym]);
+    const earnIso = earnMapOne[sym.toUpperCase()];
+    const earnSoon = earnIso && isEarningsWithinTradingDays(earnIso, 10);
+    const earnHdr = earnIso
+      ? `<span class="ticker-card-earn-wrap">${earningsTagHtml(earnIso)}</span>`
+      : '';
+
     // Fetch both counts in parallel for the header
     const [eqCount, optCount] = await Promise.all([
       fetch('/api/transactions?' + new URLSearchParams({ ticker: sym, category: 'equity', limit: 10, page: 1 })).then(r => r.json()).then(r => r.total || 0),
@@ -143,15 +162,18 @@ export async function loadCustomTickerPage(page) {
 
     const pag = _overviewPag(mainRes.page, mainRes.pages, mainRes.total, p => `loadCustomTickerPage(${p})`);
 
+    const wrapClass = earnSoon ? 'ticker-card ticker-card-earnings-soon' : 'ticker-card';
     resultDiv.innerHTML =
-      `<div class="ticker-card-header" style="margin-bottom:10px">
-        <h3 style="font-size:18px;font-weight:700">${esc(sym)}</h3>
-        <span class="trade-count">${countLabel}</span>
-        <button class="btn-ladder" onclick="openLadder('${esc(sym)}')">Ladder</button>
-      </div>` +
+      `<div class="${wrapClass}" style="padding:12px 14px;margin-bottom:0">
+        <div class="ticker-card-header" style="margin-bottom:10px">
+          <h3 style="font-size:18px;font-weight:700">${esc(sym)}</h3>
+          ${earnHdr}
+          <span class="trade-count">${countLabel}</span>
+          <button class="btn-ladder" onclick="openLadder('${esc(sym)}')">Ladder</button>
+        </div>` +
       '<table style="width:100%"><thead><tr><th>Date</th><th>Action</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>'
       + '<tbody>' + _overviewTradeRows(mainRes.data) + '</tbody></table>'
-      + pag;
+      + pag + '</div>';
   } catch(e) {
     resultDiv.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
   }

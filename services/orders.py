@@ -1,21 +1,85 @@
 """Order cleaning and building."""
 
 import datetime
+import re
+
+_OSI_RE = re.compile(r"^([A-Z/]+)\s+(\d{6})([CP])(\d{8})$")
+
+
+def parse_osi(symbol):
+    """Parse a Schwab OSI option symbol into structured fields.
+
+    Returns ``{underlying, option_type, strike, expiration_date}`` or
+    ``None`` if the input is not an OSI option symbol. Format:
+    ``UNDER  YYMMDD[C|P]00000000`` (strike scaled by 1000, 8 digits).
+    """
+    if not symbol:
+        return None
+    s = symbol.strip()
+    m = _OSI_RE.match(s)
+    if not m:
+        return None
+    try:
+        expiry = datetime.datetime.strptime("20" + m.group(2), "%Y%m%d").date().isoformat()
+    except ValueError:
+        return None
+    return {
+        "underlying": m.group(1),
+        "option_type": "CALL" if m.group(3) == "C" else "PUT",
+        "strike": int(m.group(4)) / 1000.0,
+        "expiration_date": expiry,
+    }
+
+
+def _trim_iso(s):
+    if not s:
+        return ""
+    return s[:19].replace("T", " ")
 
 
 def clean_orders(orders_data):
-    """Flatten Schwab order objects into simple dicts for the UI."""
+    """Flatten Schwab order objects into simple dicts for the UI.
+
+    Adds per-leg detail (parsed OSI for options), an ``underlyings`` list,
+    and ``release_time`` / ``cancel_time`` fields used by the orders UI to
+    surface order expiry and option DTE.
+    """
     result = []
     for order in (orders_data or []):
-        legs = order.get("orderLegCollection", [])
+        legs = order.get("orderLegCollection", []) or []
         first = legs[0] if legs else {}
-        instr = first.get("instrument", {})
-        symbol = instr.get("symbol", "")
-        asset_type = instr.get("assetType", "")
+        first_instr = first.get("instrument", {}) or {}
+        symbol = first_instr.get("symbol", "")
+        asset_type = first_instr.get("assetType", "")
         instruction = first.get("instruction", "")
         underlying = symbol.split()[0] if " " in symbol else symbol
-        entered = (order.get("enteredTime") or "")[:19].replace("T", " ")
-        close = (order.get("closeTime") or "")[:19].replace("T", " ")
+
+        legs_detail = []
+        underlyings = []
+        seen_under = set()
+        for leg in legs:
+            instr = leg.get("instrument", {}) or {}
+            sym = instr.get("symbol", "")
+            atype = instr.get("assetType", "")
+            entry = {
+                "symbol": sym,
+                "asset_type": atype,
+                "instruction": leg.get("instruction", ""),
+                "quantity": leg.get("quantity", 0),
+            }
+            leg_under = sym.split()[0] if " " in sym else sym
+            if atype == "OPTION":
+                osi = parse_osi(sym)
+                if osi:
+                    entry["option_type"] = osi["option_type"]
+                    entry["strike"] = osi["strike"]
+                    entry["expiration_date"] = osi["expiration_date"]
+                    leg_under = osi["underlying"]
+            if leg_under and leg_under not in seen_under:
+                seen_under.add(leg_under)
+                underlyings.append(leg_under)
+            legs_detail.append(entry)
+
         result.append({
             "order_id": str(order.get("orderId", "")),
             "status": order.get("status", ""),
@@ -24,6 +88,7 @@ def clean_orders(orders_data):
             "duration": order.get("duration", ""),
             "symbol": symbol,
             "underlying": underlying,
+            "underlyings": underlyings,
             "asset_type": asset_type,
             "instruction": instruction,
             "quantity": order.get("quantity", 0),
@@ -31,11 +96,14 @@ def clean_orders(orders_data):
             "remaining_quantity": order.get("remainingQuantity", 0),
             "price": order.get("price"),
             "stop_price": order.get("stopPrice"),
-            "entered_time": entered,
-            "close_time": close,
+            "entered_time": _trim_iso(order.get("enteredTime")),
+            "close_time": _trim_iso(order.get("closeTime")),
+            "release_time": _trim_iso(order.get("releaseTime")),
+            "cancel_time": _trim_iso(order.get("cancelTime")),
             "cancelable": order.get("cancelable", False),
             "editable": order.get("editable", False),
             "legs": len(legs),
+            "legs_detail": legs_detail,
         })
     return result
 

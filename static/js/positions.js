@@ -1,5 +1,6 @@
 import { fmt, fmtD, cls, esc, normalizeQty, fetchJson } from './utils.js';
 import { store as S } from './state.js';
+import { earningsTagHtml, earningsTradingDaysSortKey, fetchEarningsMap } from './earningsUi.js';
 
 export function _posUnderlyingFromOption(p) {
   return String(p.underlying_symbol || p.symbol.split(/\s+/)[0] || '').toUpperCase();
@@ -216,6 +217,14 @@ export function _posSortCompare(a, b) {
     if (bv == null) bv = S._posSortDir > 0 ? Infinity : -Infinity;
     return av < bv ? -S._posSortDir : av > bv ? S._posSortDir : 0;
   }
+  if (S._posSortCol === 'earnings_td') {
+    const ua = String(a.symbol || '').toUpperCase();
+    const ub = String(b.symbol || '').toUpperCase();
+    const av = earningsTradingDaysSortKey(S._posEarnings[ua]);
+    const bv = earningsTradingDaysSortKey(S._posEarnings[ub]);
+    if (av !== bv) return av < bv ? -S._posSortDir : S._posSortDir;
+    return String(a.symbol || '').localeCompare(String(b.symbol || ''), undefined, { sensitivity: 'base' }) * S._posSortDir;
+  }
   let av = a[S._posSortCol];
   let bv = b[S._posSortCol];
   if (av == null) av = S._posSortDir > 0 ? Infinity : -Infinity;
@@ -316,6 +325,11 @@ export function _renderPositions() {
     return diff >= 0 && diff <= 7;
   };
 
+  const _earnForSym = sym => {
+    const d = S._posEarnings[String(sym || '').toUpperCase()];
+    return earningsTagHtml(d);
+  };
+
   const dataRow = (p, isChild, underlyingKey, listId) => {
     const isOpt = p.asset_type === 'OPTION';
     const pd = isOpt ? 4 : 2;
@@ -332,6 +346,8 @@ export function _renderPositions() {
       symbolCell = `<b>${esc(p.symbol)}</b>`;
       expiryCell = '';
     }
+    const earnSym = isChild ? underlyingKey : p.symbol;
+    const earnCell = _earnForSym(earnSym);
     const uK = underlyingKey || p.symbol;
     let recentC, netC, vsC;
     if (isChild) {
@@ -356,6 +372,7 @@ export function _renderPositions() {
       <td><span class="badge badge-${p.asset_type}">${p.asset_type}</span></td>
       <td>${pcBadge}</td>
       <td>${expiryCell}</td>
+      <td class="pos-earnings-cell">${earnCell}</td>
       <td>${fmt(p.quantity, 0)}</td>
       <td>${p.avg_price != null ? '$' + fmt(p.avg_price, pd) : '—'}</td>
       <td>${p.current_price != null ? '$' + fmt(p.current_price, pd) : '—'}</td>
@@ -391,6 +408,7 @@ export function _renderPositions() {
         <span class="pos-toggle-ticker">${esc(underlying)}</span>
         <span class="pos-toggle-meta">${optCount} option position${optCount !== 1 ? 's' : ''}</span>
       </td>
+      <td class="pos-earnings-cell">${_earnForSym(underlying)}</td>
       <td></td><td></td><td></td>
       <td class="pos-num">${rc}</td>
       <td class="pos-num">${nc}</td>
@@ -407,6 +425,7 @@ export function _renderPositions() {
     <th>Type</th>
     <th>P/C</th>
     <th>Expiry</th>
+    <th class="sortable" title="Sort by trading days until earnings" onclick="window.sortPositions('earnings_td')">Earnings <span class="sort-arrow" data-pa="earnings_td"></span></th>
     <th class="sortable" onclick="window.sortPositions('quantity')">Qty <span class="sort-arrow" data-pa="quantity"></span></th>
     <th class="sortable" onclick="window.sortPositions('avg_price')">Avg Price <span class="sort-arrow" data-pa="avg_price"></span></th>
     <th class="sortable" onclick="window.sortPositions('current_price')">Mkt Price <span class="sort-arrow" data-pa="current_price"></span></th>
@@ -466,7 +485,7 @@ export function _renderPositions() {
         <span class="pos-list-count">${blocks.length} underlying</span>
       </summary>
       <div class="table-wrap pos-list-table-wrap pos-list-dropzone" data-list-id="${list.id}">
-        <table class="pos-tbl">${thead}<tbody>${inner.join('') || '<tr><td colspan="14" class="pos-list-empty">Drop tickers here</td></tr>'}</tbody></table>
+        <table class="pos-tbl">${thead}<tbody>${inner.join('') || '<tr><td colspan="16" class="pos-list-empty">Drop tickers here</td></tr>'}</tbody></table>
       </div>
     </details>`;
   });
@@ -475,7 +494,7 @@ export function _renderPositions() {
   if (el) el.innerHTML = sections.join('');
 
   const cols = ['symbol', 'quantity', 'avg_price', 'current_price', 'recent_avg', 'recent_net',
-    'vs_recent_pct', 'market_value', 'unrealized_pl', 'day_pl', 'day_pl_pct'];
+    'vs_recent_pct', 'market_value', 'unrealized_pl', 'day_pl', 'day_pl_pct', 'earnings_td'];
   document.querySelectorAll('#pos-sections .sort-arrow[data-pa]').forEach(span => {
     const col = span.getAttribute('data-pa');
     span.textContent = col === S._posSortCol ? (S._posSortDir > 0 ? ' ▲' : ' ▼') : '';
@@ -888,6 +907,7 @@ export async function loadPositions() {
       body: JSON.stringify({ symbols: underlyings }),
     });
     S._posRecentMetrics = metrics.metrics || {};
+    S._posEarnings = await fetchEarningsMap(underlyings);
     document.getElementById('pos-loading').style.display = 'none';
     document.getElementById('pos-error').style.display = 'none';
     const wrap = document.getElementById('pos-table-wrap');

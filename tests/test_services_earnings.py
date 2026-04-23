@@ -1,0 +1,156 @@
+"""Tests for services/earnings.py: TTL caching and next-future-date selection."""
+import os
+import sys
+from datetime import date, timedelta
+from unittest.mock import MagicMock
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import services.earnings as earnings_mod
+from services.earnings import _clear_cache_for_tests, get_next_earnings
+
+
+@pytest.fixture(autouse=True)
+def _reset_cache():
+    _clear_cache_for_tests()
+    yield
+    _clear_cache_for_tests()
+
+
+class _FakeIndex(list):
+    @property
+    def empty(self):
+        return len(self) == 0
+
+
+class _FakeDF:
+    def __init__(self, dates):
+        self.index = _FakeIndex([_FakeTs(d) for d in dates])
+
+    @property
+    def empty(self):
+        return len(self.index) == 0
+
+
+class _FakeTs:
+    def __init__(self, d):
+        self._d = d
+
+    def date(self):
+        return self._d
+
+
+def _install_fake_yf(monkeypatch, ticker_factory):
+    """Install a stub ``yfinance`` module exposing ``Ticker``."""
+    fake_yf = MagicMock()
+    fake_yf.Ticker = ticker_factory
+    monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
+
+
+class TestNextFutureDateSelection:
+    def test_picks_soonest_future_date(self, monkeypatch):
+        today = date.today()
+        future1 = today + timedelta(days=10)
+        future2 = today + timedelta(days=3)
+        past = today - timedelta(days=5)
+
+        ticker = MagicMock()
+        ticker.get_earnings_dates.return_value = _FakeDF([past, future1, future2])
+        ticker.calendar = None
+
+        _install_fake_yf(monkeypatch, lambda _sym: ticker)
+
+        out = get_next_earnings(["AAPL"])
+        assert out == {"AAPL": future2.isoformat()}
+
+    def test_no_future_date_returns_none(self, monkeypatch):
+        past = date.today() - timedelta(days=2)
+        ticker = MagicMock()
+        ticker.get_earnings_dates.return_value = _FakeDF([past])
+        ticker.calendar = None
+
+        _install_fake_yf(monkeypatch, lambda _sym: ticker)
+
+        out = get_next_earnings(["NVDA"])
+        assert out == {"NVDA": None}
+
+    def test_yfinance_failure_returns_none(self, monkeypatch):
+        def _factory(_sym):
+            raise RuntimeError("network down")
+
+        _install_fake_yf(monkeypatch, _factory)
+
+        out = get_next_earnings(["TSLA"])
+        assert out == {"TSLA": None}
+
+
+class TestCaching:
+    def test_second_call_does_not_hit_yfinance(self, monkeypatch):
+        future = date.today() + timedelta(days=4)
+        ticker = MagicMock()
+        ticker.get_earnings_dates.return_value = _FakeDF([future])
+        ticker.calendar = None
+
+        call_count = {"n": 0}
+
+        def factory(_sym):
+            call_count["n"] += 1
+            return ticker
+
+        _install_fake_yf(monkeypatch, factory)
+
+        first = get_next_earnings(["AMZN"])
+        assert first == {"AMZN": future.isoformat()}
+        assert call_count["n"] == 1
+
+        second = get_next_earnings(["AMZN"])
+        assert second == {"AMZN": future.isoformat()}
+        assert call_count["n"] == 1, "Cache must serve the second call"
+
+    def test_dedupes_and_uppercases_input(self, monkeypatch):
+        future = date.today() + timedelta(days=2)
+        ticker = MagicMock()
+        ticker.get_earnings_dates.return_value = _FakeDF([future])
+        ticker.calendar = None
+
+        call_count = {"n": 0}
+
+        def factory(_sym):
+            call_count["n"] += 1
+            return ticker
+
+        _install_fake_yf(monkeypatch, factory)
+
+        out = get_next_earnings(["aapl", "AAPL", " aapl ", ""])
+        assert "AAPL" in out
+        assert call_count["n"] == 1
+
+    def test_cache_ttl_expires(self, monkeypatch):
+        future = date.today() + timedelta(days=2)
+        ticker = MagicMock()
+        ticker.get_earnings_dates.return_value = _FakeDF([future])
+        ticker.calendar = None
+
+        call_count = {"n": 0}
+
+        def factory(_sym):
+            call_count["n"] += 1
+            return ticker
+
+        _install_fake_yf(monkeypatch, factory)
+
+        get_next_earnings(["GOOG"])
+        assert call_count["n"] == 1
+
+        # Bump simulated clock past the 24h TTL to force a refresh.
+        monkeypatch.setattr(
+            earnings_mod, "_now",
+            lambda: __import__("time").time() + earnings_mod._CACHE_TTL_SECONDS + 100,
+        )
+        get_next_earnings(["GOOG"])
+        assert call_count["n"] == 2
+
+    def test_empty_input(self):
+        assert get_next_earnings([]) == {}

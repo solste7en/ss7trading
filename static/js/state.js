@@ -23,6 +23,8 @@ export const store = {
   _posExpanded: new Set(),
   _posDndBound: false,
   _posVolume365: {},
+  /** Uppercase symbol -> next earnings YYYY-MM-DD or null (from /api/earnings). */
+  _posEarnings: {},
   _posDndPayload: null,
 
   _posChartLong: null,
@@ -67,6 +69,7 @@ export const store = {
   _ladderOrders: [],
 
   _allOrders: [],
+  _ordersCtx: { quoteBySymbol: {}, earningsByUnderlying: {} },
   _ordSortCol: 'entered_time',
   _ordSortDir: -1,
   ordersState: { loaded: false },
@@ -91,6 +94,13 @@ export const store = {
   consolidationState: { loaded: false, overlapData: null },
 
   wlState: { lists: [], currentId: 'positions', initialized: false },
+  /** Quote tab: last fetched rows + earnings map + client sort. */
+  _qRows: [],
+  _qEarnMap: {},
+  _qSortCol: 'symbol',
+  _qSortDir: 1,
+  _qIsCustom: false,
+  _qListId: 'positions',
   historyState: { page: 1, loaded: false },
   gainsState: { page: 1, loaded: false },
   _paginationRegistry: {},

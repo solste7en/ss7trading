@@ -2,6 +2,7 @@ import { fmt, fmtD, cls, esc, fetchJson, ladderResultTableHtml, round2 } from '.
 import { normalizeQty } from './utils.js';
 import { store as S } from './state.js';
 import { findChainContract, makeStrikeSelectOptions } from './optionChainHelpers.js';
+import { renderOrders, enrichOrders } from './orders.js';
 
 export function _stratLadderEnabled() {
   const el = document.getElementById('strat-ladder-en');
@@ -543,25 +544,12 @@ export async function loadStrategyOrders() {
 
     cancelBtn.style.display = '';
 
-    const rows = orders.map(o => {
-      const sc = (o.instruction || '').includes('SELL') ? 'neg' : 'pos';
-      const p = o.price != null ? '$' + fmt(o.price, 2)
-              : o.stop_price != null ? 'Stp $' + fmt(o.stop_price) : '—';
-      const cancelHtml = o.cancelable
-        ? '<button class="cancel-single-btn" onclick="cancelStratOrder(\'' + esc(o.order_id) + '\')">✕</button>'
-        : '';
-      return '<tr>' +
-        '<td><span class="' + sc + '">' + esc(o.instruction) + '</span></td>' +
-        '<td>' + fmt(o.quantity, 0) + '</td>' +
-        '<td>' + p + '</td>' +
-        '<td><span class="badge badge-status-' + o.status + '" style="font-size:9px;padding:1px 5px">' + o.status + '</span></td>' +
-        '<td>' + cancelHtml + '</td>' +
-      '</tr>';
-    }).join('');
-
-    container.innerHTML =
-      '<table><thead><tr><th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th></th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table>';
+    const ctx = await enrichOrders(orders);
+    renderOrders('strat-orders', null, orders, {
+      variant: 'strategy',
+      ctx,
+      cancelHandlerName: 'cancelStratOrder',
+    });
   } catch(e) {
     container.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';
   }

@@ -1,5 +1,6 @@
 import { fmt, fmtD, cls, esc, normalizeQty, fetchJson, ladderResultTableHtml } from './utils.js';
 import { store as S } from './state.js';
+import { renderOrders, enrichOrders } from './orders.js';
 
 export function renderRungs() {
   if (typeof window !== 'undefined') window.ladderRungs = S.ladderRungs;
@@ -556,31 +557,12 @@ export async function loadLadderOrders() {
 
     cancelAllBtn.style.display = '';
 
-    const rows = orders.map(o => {
-      const sideClass = (o.instruction || '').includes('SELL') ? 'neg' : 'pos';
-      const priceStr = o.price != null ? '$' + fmt(o.price, 2)
-                     : o.stop_price != null ? 'Stop $' + fmt(o.stop_price) : '—';
-      const isOpt = o.asset_type !== 'EQUITY';
-      const symbolLabel = isOpt
-        ? `<span style="color:#94a3b8" title="${esc(o.symbol)}">${esc(o.symbol.substring(0, 20))}</span>`
-        : '';
-      const cancelBtn = o.cancelable
-        ? `<button class="cancel-single-btn" onclick="window.cancelLadderOrder('${esc(o.order_id)}')">✕</button>`
-        : '';
-      return `<tr>
-        <td><span class="${sideClass}">${esc(o.instruction)}</span></td>
-        <td>${fmt(o.quantity, 0)}</td>
-        <td>${priceStr}</td>
-        <td><span class="badge badge-status-${o.status}" style="font-size:9px;padding:1px 5px">${o.status}</span></td>
-        <td>${symbolLabel}</td>
-        <td>${cancelBtn}</td>
-      </tr>`;
-    }).join('');
-
-    container.innerHTML =
-      '<table><thead><tr>' +
-      '<th>Side</th><th>Qty</th><th>Price</th><th>Status</th><th>Symbol</th><th></th>' +
-      '</tr></thead><tbody>' + rows + '</tbody></table>';
+    const ctx = await enrichOrders(orders);
+    renderOrders('lad-orders', null, orders, {
+      variant: 'ladder',
+      ctx,
+      cancelHandlerName: 'cancelLadderOrder',
+    });
 
   } catch (e) {
     container.innerHTML = '<div class="error" style="font-size:12px">Error: ' + esc(e.message) + '</div>';

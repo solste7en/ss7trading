@@ -167,8 +167,16 @@
   <div id="q-error" class="error" style="display:none"></div>
   <div class="table-wrap">
     <table style="display:none" id="q-table"><thead><tr>
-      <th>Symbol</th><th>Last</th><th>Bid</th><th>Ask</th>
-      <th>Change</th><th>Change %</th><th>Volume</th><th>52W High</th><th>52W Low</th>
+      <th class="sortable" onclick="sortQuotes('symbol')">Symbol <span class="sort-arrow" data-qa="symbol"></span></th>
+      <th class="sortable" title="Sort by trading days until earnings" onclick="sortQuotes('earnings_td')">Earnings <span class="sort-arrow" data-qa="earnings_td"></span></th>
+      <th class="sortable" onclick="sortQuotes('last')">Last <span class="sort-arrow" data-qa="last"></span></th>
+      <th class="sortable" onclick="sortQuotes('bid')">Bid <span class="sort-arrow" data-qa="bid"></span></th>
+      <th class="sortable" onclick="sortQuotes('ask')">Ask <span class="sort-arrow" data-qa="ask"></span></th>
+      <th class="sortable" onclick="sortQuotes('change')">Change <span class="sort-arrow" data-qa="change"></span></th>
+      <th class="sortable" onclick="sortQuotes('change_pct')">Change % <span class="sort-arrow" data-qa="change_pct"></span></th>
+      <th class="sortable" onclick="sortQuotes('volume')">Volume <span class="sort-arrow" data-qa="volume"></span></th>
+      <th class="sortable" onclick="sortQuotes('hi52')">52W High <span class="sort-arrow" data-qa="hi52"></span></th>
+      <th class="sortable" onclick="sortQuotes('lo52')">52W Low <span class="sort-arrow" data-qa="lo52"></span></th>
       <th id="q-remove-col" style="display:none"></th>
     </tr></thead><tbody id="q-tbody"></tbody></table>
   </div>
@@ -1072,6 +1080,10 @@
         <th onclick="sortOrders('quantity')">Qty ↕</th>
         <th onclick="sortOrders('filled_quantity')">Filled ↕</th>
         <th onclick="sortOrders('price')">Price ↕</th>
+        <th onclick="sortOrders('distance_pct')">Mark / Dist ↕</th>
+        <th onclick="sortOrders('dte')">DTE ↕</th>
+        <th>TIF / Expires</th>
+        <th>Warnings</th>
         <th onclick="sortOrders('entered_time')">Entered ↕</th>
         <th>Action</th>
       </tr></thead>

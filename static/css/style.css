@@ -451,6 +451,45 @@ tr.pos-dragging td { opacity: 0.55; }
   color: var(--color-neg-soft); padding: 3px 10px; cursor: pointer; font-size: 11px; }
 .cancel-order-btn:hover { background: var(--color-danger-border); }
 
+/* Open Orders enrichment: warning pills + distance color cues */
+.ord-warn {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 1px 2px 1px 0;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.ord-warn-hi  { background: var(--color-danger-bg);     color: var(--color-neg-soft);   border: 1px solid var(--color-danger-border); }
+.ord-warn-mid { background: var(--color-yellow-muted-bg); color: var(--color-amber-soft); border: 1px solid var(--color-amber-soft); }
+.ord-warn-lo  { background: var(--color-border-subtle); color: var(--color-text-secondary); border: 1px solid var(--color-border-subtle); }
+.ord-dist-ok  { color: var(--color-pos-soft); font-weight: 600; }
+.ord-dist-mid { color: var(--color-amber-soft); font-weight: 600; }
+.ord-dist-bad { color: var(--color-neg-soft); font-weight: 600; }
+
+/* Earnings / catalyst tags (positions, quotes, spotlight) */
+.earn-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+  background: var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-subtle);
+}
+.earn-tag-soon {
+  background: var(--color-yellow-muted-bg);
+  color: var(--color-amber-soft);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+}
+.earn-tag-na { opacity: 0.75; }
+.pos-earnings-cell, .q-earnings-cell { white-space: nowrap; max-width: 140px; }
+.quote-earn-line { margin: 4px 0 10px; font-size: 12px; }
+
 /* ── Ladder tab ── */
 .ladder-layout {
   display: grid;
@@ -605,7 +644,13 @@ tr.pos-dragging td { opacity: 0.55; }
 /* ── Overview tab ── */
 .overview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 16px; }
 .ticker-card { background: var(--color-surface-2); border: 1px solid var(--color-border-subtle); border-radius: 10px; padding: 16px 18px; }
-.ticker-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.ticker-card-earnings-soon {
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.45);
+  border-color: rgba(251, 191, 36, 0.55);
+}
+.ticker-card-earn-wrap { flex: 1 1 auto; min-width: 0; }
+.ticker-card-earn-wrap .earn-tag { vertical-align: middle; }
+.ticker-card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
 .ticker-card-header h3 { font-size: 18px; font-weight: 700; }
 .ticker-card-header .trade-count { color: var(--color-text-muted); font-size: 12px; }
 .ticker-card table { width: 100%; }

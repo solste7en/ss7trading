@@ -108,6 +108,41 @@ class TestQuotesBlueprint:
         assert r.status_code == 200
         assert r.get_json() == []
 
+    @patch("blueprints.quotes.get_client")
+    def test_api_quotes_symbols(self, mock_gc, client):
+        mock_gc.return_value = _mock_schwab_client()
+        r = client.get("/api/quotes/symbols?symbols=NVDA")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert isinstance(data, list)
+        assert data[0]["symbol"] == "NVDA"
+
+    def test_api_quotes_symbols_empty(self, client):
+        r = client.get("/api/quotes/symbols")
+        assert r.status_code == 200
+        assert r.get_json() == []
+
+    def test_api_quotes_symbols_too_many(self, client):
+        big = ",".join(f"T{i}" for i in range(60))
+        r = client.get("/api/quotes/symbols?symbols=" + big)
+        assert r.status_code == 400
+
+    @patch("blueprints.quotes.get_next_earnings", return_value={"AAPL": "2026-05-01"})
+    def test_api_earnings(self, _mock, client):
+        r = client.get("/api/earnings?symbols=AAPL")
+        assert r.status_code == 200
+        assert r.get_json() == {"AAPL": "2026-05-01"}
+
+    def test_api_earnings_empty(self, client):
+        r = client.get("/api/earnings")
+        assert r.status_code == 200
+        assert r.get_json() == {}
+
+    def test_api_earnings_too_many(self, client):
+        big = ",".join(f"T{i}" for i in range(60))
+        r = client.get("/api/earnings?symbols=" + big)
+        assert r.status_code == 400
+
 
 class TestWatchlistsBlueprint:
     @patch("blueprints.watchlists.get_watchlists", return_value=[])

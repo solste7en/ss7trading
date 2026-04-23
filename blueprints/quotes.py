@@ -3,15 +3,30 @@
 import logging
 
 import schwab
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from core.auth import get_client
 from core.db import get_watchlist_symbols
+from services.earnings import get_next_earnings
 from services.positions import clean_positions
 from services.quotes import clean_quotes
 
 log = logging.getLogger(__name__)
 bp = Blueprint("quotes", __name__)
+
+_MAX_BATCH = 50
+
+
+def _parse_symbols_param() -> list[str]:
+    raw = request.args.get("symbols", "") or ""
+    out = []
+    seen = set()
+    for tok in raw.split(","):
+        s = tok.strip().upper()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
 
 
 @bp.route("/api/quotes")
@@ -68,6 +83,39 @@ def api_quotes_for_list(list_id):
         resp = client.get_quotes(symbols)
         resp.raise_for_status()
         return jsonify(clean_quotes(resp.json()))
+    except Exception as e:
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/quotes/symbols")
+def api_quotes_symbols():
+    """Generic batch quote endpoint: ``?symbols=AAPL,NVDA,...``."""
+    symbols = _parse_symbols_param()
+    if not symbols:
+        return jsonify([])
+    if len(symbols) > _MAX_BATCH:
+        return jsonify({"error": f"Too many symbols (max {_MAX_BATCH})."}), 400
+    try:
+        client = get_client()
+        resp = client.get_quotes(symbols)
+        resp.raise_for_status()
+        return jsonify(clean_quotes(resp.json()))
+    except Exception as e:
+        log.exception("API error")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/earnings")
+def api_earnings():
+    """Next earnings date per symbol via yfinance, cached 24h."""
+    symbols = _parse_symbols_param()
+    if not symbols:
+        return jsonify({})
+    if len(symbols) > _MAX_BATCH:
+        return jsonify({"error": f"Too many symbols (max {_MAX_BATCH})."}), 400
+    try:
+        return jsonify(get_next_earnings(symbols))
     except Exception as e:
         log.exception("API error")
         return jsonify({"error": str(e)}), 500

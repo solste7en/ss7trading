@@ -16,7 +16,7 @@ import {
 import {
   initWatchlists, selectWatchlist, showNewListForm, hideNewListForm,
   createWatchlist, deleteCurrentList, addWatchlistSymbol,
-  removeWatchlistSymbol, loadQuotes, fetchQuote,
+  removeWatchlistSymbol, loadQuotes, sortQuotes, fetchQuote,
 } from './quotes.js';
 import {
   loadHistory, closeSyncModal, syncTrades, loadGains, renderPagination,
@@ -76,7 +76,7 @@ Object.assign(window, {
   // quotes
   initWatchlists, selectWatchlist, showNewListForm, hideNewListForm,
   createWatchlist, deleteCurrentList, addWatchlistSymbol,
-  removeWatchlistSymbol, loadQuotes, fetchQuote,
+  removeWatchlistSymbol, loadQuotes, sortQuotes, fetchQuote,
   // history
   loadHistory, closeSyncModal, syncTrades, loadGains, renderPagination,
   // income
