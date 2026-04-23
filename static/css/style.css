@@ -487,6 +487,8 @@ tr.pos-dragging td { opacity: 0.55; }
   border: 1px solid rgba(251, 191, 36, 0.45);
 }
 .earn-tag-na { opacity: 0.75; }
+.earn-tag[data-earn-refresh] { cursor: pointer; }
+.earn-tag[data-earn-refresh]:hover { filter: brightness(1.15); }
 .pos-earnings-cell, .q-earnings-cell { white-space: nowrap; max-width: 140px; }
 .quote-earn-line { margin: 4px 0 10px; font-size: 12px; }
 

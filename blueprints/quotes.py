@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, request
 
 from core.auth import get_client
 from core.db import get_watchlist_symbols
-from services.earnings import get_next_earnings
+from services.earnings import clear_earnings_cache, get_next_earnings
 from services.positions import clean_positions
 from services.quotes import clean_quotes
 
@@ -108,7 +108,7 @@ def api_quotes_symbols():
 
 @bp.route("/api/earnings")
 def api_earnings():
-    """Next earnings date per symbol via yfinance, cached 24h."""
+    """Next earnings date per symbol via yfinance, cached per-symbol TTL."""
     symbols = _parse_symbols_param()
     if not symbols:
         return jsonify({})
@@ -118,4 +118,18 @@ def api_earnings():
         return jsonify(get_next_earnings(symbols))
     except Exception as e:
         log.exception("API error")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/api/earnings/<symbol>", methods=["DELETE"])
+def api_earnings_refresh(symbol):
+    """Clear cached earnings for one symbol and return fresh data."""
+    sym = symbol.upper().strip()
+    if not sym:
+        return jsonify({"error": "symbol required"}), 400
+    clear_earnings_cache(sym)
+    try:
+        return jsonify(get_next_earnings([sym]))
+    except Exception as e:
+        log.exception("earnings refresh error")
         return jsonify({"error": str(e)}), 500

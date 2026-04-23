@@ -64,14 +64,17 @@ MIGRATIONS: list[tuple[str, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_tx_activity_id ON transactions(activity_id)",
         ],
     ),
-    # ── future migrations go here ──────────────────────────────────────────────
-    # (
-    #     "002",
-    #     "Short description of what changes",
-    #     [
-    #         "ALTER TABLE ...",
-    #     ],
-    # ),
+    (
+        "002",
+        "Add earnings_cache table for persistent per-symbol TTL caching",
+        [
+            """CREATE TABLE IF NOT EXISTS earnings_cache (
+                symbol        TEXT PRIMARY KEY,
+                earnings_date TEXT,
+                fetched_at    REAL NOT NULL
+            )""",
+        ],
+    ),
 ]
 
 # ── internal helpers ──────────────────────────────────────────────────────────

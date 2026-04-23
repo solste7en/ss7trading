@@ -4,11 +4,26 @@ import {
   earningsTagHtml,
   earningsTradingDaysSortKey,
   fetchEarningsMap,
+  refreshEarningsForSymbol,
 } from './earningsUi.js';
 
 export async function initWatchlists() {
   if (S.wlState.initialized) { loadQuotes(); return; }
   S.wlState.initialized = true;
+  const qTable = document.getElementById('q-table');
+  if (qTable) {
+    qTable.addEventListener('click', async e => {
+      const tag = e.target.closest('[data-earn-refresh]');
+      if (!tag) return;
+      const sym = tag.dataset.symbol;
+      if (!sym) return;
+      const td = tag.closest('td');
+      if (td) td.innerHTML = '<span class="earn-tag earn-tag-na">…</span>';
+      const result = await refreshEarningsForSymbol(sym);
+      if (result) S._qEarnMap[sym.toUpperCase()] = result[sym.toUpperCase()] ?? null;
+      if (td) td.innerHTML = earningsTagHtml(S._qEarnMap[sym.toUpperCase()], { symbol: sym });
+    });
+  }
   try {
     const lists = await fetch('/api/watchlists').then(r => r.json());
     S.wlState.lists = lists;
@@ -159,7 +174,7 @@ function _sortedQuoteRows() {
 
 function _quoteRowHtml(q, id, isCustom) {
   const ed = S._qEarnMap[String(q.symbol || '').toUpperCase()];
-  const earnHtml = earningsTagHtml(ed);
+  const earnHtml = earningsTagHtml(ed, { symbol: q.symbol });
   return `<tr>
       <td><b>${esc(q.symbol)}</b></td>
       <td class="q-earnings-cell">${earnHtml}</td>

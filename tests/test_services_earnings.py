@@ -1,4 +1,4 @@
-"""Tests for services/earnings.py: TTL caching and next-future-date selection."""
+"""Tests for services/earnings.py: SQLite-backed TTL caching and next-future-date selection."""
 import os
 import sys
 from datetime import date, timedelta
@@ -9,11 +9,18 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import services.earnings as earnings_mod
-from services.earnings import _clear_cache_for_tests, get_next_earnings
+from services.earnings import (
+    HAS_EARNINGS_TTL,
+    NO_EARNINGS_TTL,
+    _clear_cache_for_tests,
+    clear_earnings_cache,
+    get_next_earnings,
+)
 
 
 @pytest.fixture(autouse=True)
-def _reset_cache():
+def _reset_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(earnings_mod, "_DB_PATH_OVERRIDE", str(tmp_path / "test.db"))
     _clear_cache_for_tests()
     yield
     _clear_cache_for_tests()
@@ -127,8 +134,9 @@ class TestCaching:
         assert "AAPL" in out
         assert call_count["n"] == 1
 
-    def test_cache_ttl_expires(self, monkeypatch):
-        future = date.today() + timedelta(days=2)
+    def test_has_date_uses_7day_ttl(self, monkeypatch):
+        """A symbol with a real date refreshes after 7 days, not 90."""
+        future = date.today() + timedelta(days=4)
         ticker = MagicMock()
         ticker.get_earnings_dates.return_value = _FakeDF([future])
         ticker.calendar = None
@@ -144,13 +152,65 @@ class TestCaching:
         get_next_earnings(["GOOG"])
         assert call_count["n"] == 1
 
-        # Bump simulated clock past the 24h TTL to force a refresh.
-        monkeypatch.setattr(
-            earnings_mod, "_now",
-            lambda: __import__("time").time() + earnings_mod._CACHE_TTL_SECONDS + 100,
-        )
+        # Within 7-day TTL → no re-fetch
+        monkeypatch.setattr(earnings_mod, "_now", lambda: __import__("time").time() + HAS_EARNINGS_TTL - 10)
+        get_next_earnings(["GOOG"])
+        assert call_count["n"] == 1
+
+        # Past 7-day TTL → re-fetch
+        monkeypatch.setattr(earnings_mod, "_now", lambda: __import__("time").time() + HAS_EARNINGS_TTL + 10)
         get_next_earnings(["GOOG"])
         assert call_count["n"] == 2
+
+    def test_null_result_uses_90day_ttl(self, monkeypatch):
+        """A null result (ETF/delisted) refreshes after 90 days, not 7."""
+        ticker = MagicMock()
+        ticker.get_earnings_dates.return_value = _FakeDF([])
+        ticker.calendar = None
+
+        call_count = {"n": 0}
+
+        def factory(_sym):
+            call_count["n"] += 1
+            return ticker
+
+        _install_fake_yf(monkeypatch, factory)
+
+        get_next_earnings(["SPY"])
+        assert call_count["n"] == 1
+
+        # Past 7-day TTL but within 90-day TTL → still cached
+        monkeypatch.setattr(earnings_mod, "_now", lambda: __import__("time").time() + HAS_EARNINGS_TTL + 10)
+        get_next_earnings(["SPY"])
+        assert call_count["n"] == 1, "Null result should be cached for 90 days"
+
+        # Past 90-day TTL → re-fetch
+        monkeypatch.setattr(earnings_mod, "_now", lambda: __import__("time").time() + NO_EARNINGS_TTL + 10)
+        get_next_earnings(["SPY"])
+        assert call_count["n"] == 2
+
+    def test_clear_earnings_cache_forces_refetch(self, monkeypatch):
+        """clear_earnings_cache() removes the entry so the next call re-fetches."""
+        future = date.today() + timedelta(days=4)
+        ticker = MagicMock()
+        ticker.get_earnings_dates.return_value = _FakeDF([future])
+        ticker.calendar = None
+
+        call_count = {"n": 0}
+
+        def factory(_sym):
+            call_count["n"] += 1
+            return ticker
+
+        _install_fake_yf(monkeypatch, factory)
+
+        get_next_earnings(["MSFT"])
+        assert call_count["n"] == 1
+
+        clear_earnings_cache("MSFT")
+
+        get_next_earnings(["MSFT"])
+        assert call_count["n"] == 2, "Cleared cache must trigger re-fetch"
 
     def test_empty_input(self):
         assert get_next_earnings([]) == {}

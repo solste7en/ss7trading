@@ -1,6 +1,6 @@
 import { fmt, fmtD, cls, esc, normalizeQty, fetchJson } from './utils.js';
 import { store as S } from './state.js';
-import { earningsTagHtml, earningsTradingDaysSortKey, fetchEarningsMap } from './earningsUi.js';
+import { earningsTagHtml, earningsTradingDaysSortKey, fetchEarningsMap, refreshEarningsForSymbol } from './earningsUi.js';
 
 export function _posUnderlyingFromOption(p) {
   return String(p.underlying_symbol || p.symbol.split(/\s+/)[0] || '').toUpperCase();
@@ -33,6 +33,18 @@ export function bindPositionsDnD() {
     if (e.target.closest('.pos-drag-handle')) return;
     if (e.target.closest('button')) return;
     togglePosGroup(tr.dataset.expandUnderlying);
+  });
+
+  root.addEventListener('click', async e => {
+    const tag = e.target.closest('[data-earn-refresh]');
+    if (!tag) return;
+    const sym = tag.dataset.symbol;
+    if (!sym) return;
+    const td = tag.closest('td');
+    if (td) td.innerHTML = '<span class="earn-tag earn-tag-na">…</span>';
+    const result = await refreshEarningsForSymbol(sym);
+    if (result) S._posEarnings[sym.toUpperCase()] = result[sym.toUpperCase()] ?? null;
+    if (td) td.innerHTML = earningsTagHtml(S._posEarnings[sym.toUpperCase()], { symbol: sym });
   });
 
   root.addEventListener('dragstart', e => {
@@ -327,7 +339,7 @@ export function _renderPositions() {
 
   const _earnForSym = sym => {
     const d = S._posEarnings[String(sym || '').toUpperCase()];
-    return earningsTagHtml(d);
+    return earningsTagHtml(d, { symbol: sym });
   };
 
   const dataRow = (p, isChild, underlyingKey, listId) => {

@@ -85,11 +85,15 @@ export async function fetchEarningsMap(symbols) {
 
 /**
  * @param {string|null|undefined} dateIso YYYY-MM-DD from API
- * @param {{ compact?: boolean }} opts
+ * @param {{ compact?: boolean, symbol?: string }} opts
  */
 export function earningsTagHtml(dateIso, opts = {}) {
+  const symAttr = opts.symbol
+    ? ` data-symbol="${esc(opts.symbol)}" data-earn-refresh`
+    : '';
+  const refreshHint = opts.symbol ? ' · click to refresh' : '';
   if (!dateIso) {
-    return '<span class="earn-tag earn-tag-na" title="No upcoming earnings from data source">—</span>';
+    return `<span class="earn-tag earn-tag-na"${symAttr} title="No upcoming earnings from data source${refreshHint}">—</span>`;
   }
   const soon = isEarningsWithinTradingDays(dateIso, 10);
   const td = tradingDaysUntil(dateIso);
@@ -98,6 +102,15 @@ export function earningsTagHtml(dateIso, opts = {}) {
   const [y, mo, d] = dateIso.split('-');
   const label = `${mon[parseInt(mo, 10) - 1]} ${parseInt(d, 10)}`;
   const sub = td != null ? ` · ${td}td` : '';
-  const title = `Next earnings: ${dateIso}${td != null ? ` (${td} trading day${td !== 1 ? 's' : ''})` : ''}`;
-  return `<span class="${cls}" title="${esc(title)}">${esc(label)}${esc(sub)}</span>`;
+  const title = `Next earnings: ${dateIso}${td != null ? ` (${td} trading day${td !== 1 ? 's' : ''})` : ''}${refreshHint}`;
+  return `<span class="${cls}"${symAttr} title="${esc(title)}">${esc(label)}${esc(sub)}</span>`;
+}
+
+export async function refreshEarningsForSymbol(symbol) {
+  try {
+    const res = await fetch(`/api/earnings/${encodeURIComponent(symbol)}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (data && !data.error) return data;
+  } catch (_) { /* ignore */ }
+  return null;
 }
