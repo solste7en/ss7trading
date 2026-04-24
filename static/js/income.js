@@ -727,15 +727,24 @@ export async function loadRecoverySummary() {
   }
 }
 
-export async function syncIncome() {
+export async function syncIncome(mode = 'incremental') {
+  const dd = document.getElementById('ip-sync-dropdown');
+  if (dd) dd.style.display = 'none';
+
   const btn = document.getElementById('ip-sync-btn');
+  const caret = document.getElementById('ip-sync-caret');
   const icon = document.getElementById('ip-sync-icon');
   btn.disabled = true;
+  if (caret) caret.disabled = true;
   icon.classList.add('ip-spin');
   document.getElementById('ip-last-sync').textContent = 'Syncing…';
 
   try {
-    const res = await fetch('/api/income/sync', { method: 'POST' }).then(r => r.json());
+    const res = await fetch('/api/income/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    }).then(r => r.json());
     if (res.error) throw new Error(res.error);
     Object.keys(S._ipRecoveryCache).forEach(k => delete S._ipRecoveryCache[k]);
     loadIncomeStats();
@@ -744,6 +753,22 @@ export async function syncIncome() {
     alert('Sync error: ' + e.message);
   } finally {
     btn.disabled = false;
+    if (caret) caret.disabled = false;
     icon.classList.remove('ip-spin');
   }
 }
+
+export function toggleSyncDropdown(e) {
+  e.stopPropagation();
+  const dd = document.getElementById('ip-sync-dropdown');
+  if (!dd) return;
+  dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+
+// Close the dropdown when clicking outside it.
+document.addEventListener('click', e => {
+  if (!e.target.closest('#ip-sync-split')) {
+    const dd = document.getElementById('ip-sync-dropdown');
+    if (dd) dd.style.display = 'none';
+  }
+});

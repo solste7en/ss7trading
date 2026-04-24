@@ -780,6 +780,8 @@ tr.pos-dragging td { opacity: 0.55; }
 .ip-filters input { width: 130px; text-transform: uppercase; }
 .ip-sync-area { display: flex; align-items: center; gap: 10px; }
 .ip-sync-time { font-size: 11px; color: var(--color-text-muted); }
+
+/* Legacy single-button (still used on other tabs e.g. history) */
 .ip-sync-btn {
   background: var(--color-accent-deep); color: var(--color-accent-text); border: 1px solid var(--color-accent-border);
   border-radius: 6px; padding: 7px 16px; cursor: pointer; font-size: 12px;
@@ -788,6 +790,40 @@ tr.pos-dragging td { opacity: 0.55; }
 }
 .ip-sync-btn:hover:not(:disabled) { background: var(--color-accent-hover); }
 .ip-sync-btn:disabled { opacity: .5; cursor: default; }
+
+/* Split sync button */
+.ip-sync-split { position: relative; display: inline-flex; }
+.ip-sync-main-btn {
+  background: var(--color-accent-deep); color: var(--color-accent-text);
+  border: 1px solid var(--color-accent-border); border-right: none;
+  border-radius: 6px 0 0 6px; padding: 7px 14px; cursor: pointer; font-size: 12px;
+  font-weight: 500; display: flex; align-items: center; gap: 6px;
+  transition: background .15s;
+}
+.ip-sync-main-btn:hover:not(:disabled) { background: var(--color-accent-hover); }
+.ip-sync-main-btn:disabled { opacity: .5; cursor: default; }
+.ip-sync-caret-btn {
+  background: var(--color-accent-deep); color: var(--color-accent-text);
+  border: 1px solid var(--color-accent-border); border-left-color: rgba(255,255,255,0.15);
+  border-radius: 0 6px 6px 0; padding: 7px 9px; cursor: pointer; font-size: 10px;
+  transition: background .15s;
+}
+.ip-sync-caret-btn:hover:not(:disabled) { background: var(--color-accent-hover); }
+.ip-sync-caret-btn:disabled { opacity: .5; cursor: default; }
+.ip-sync-dropdown {
+  position: absolute; top: calc(100% + 4px); right: 0;
+  background: var(--color-surface-elevated); border: 1px solid var(--color-border);
+  border-radius: 6px; min-width: 230px; z-index: 200;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35); padding: 4px 0;
+}
+.ip-sync-dropdown button {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 14px; background: none; border: none;
+  color: var(--color-text); font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.ip-sync-dropdown button:hover { background: var(--color-hover); }
+.ip-sync-destructive { color: var(--color-danger, #f87171) !important; }
+
 .ip-spin { display: inline-block; animation: ipSpin 1s linear infinite; }
 @keyframes ipSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 

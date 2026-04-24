@@ -22,6 +22,7 @@ from collections import defaultdict
 from core.auth import get_client
 from core.db import (
     clear_income_trades,
+    get_income_sync_time,
     set_income_sync_time,
     upsert_income_trade,
 )
@@ -74,8 +75,15 @@ def _fetch_transactions_chunked(client, acct_hash, start_dt, end_dt):
     return deduped
 
 
-def run_sync():
-    """Full re-sync: fetch from Schwab API, process, store."""
+def run_sync(mode: str = "incremental") -> dict:
+    """Sync income trades from Schwab API.
+
+    mode:
+      "incremental" — fetch from last_sync − 90 days (or full start if no prior sync)
+      "90d"         — fetch last 90 calendar days, upsert only
+      "ytd"         — fetch since Jan 1 of current year, upsert only
+      "full"        — fetch since INCOME_SYNC_START_DATE, wipe DB first
+    """
     client = get_client()
 
     # 1. Get account hash
@@ -84,10 +92,31 @@ def run_sync():
     acct_hash = resp.json()[0]["hashValue"]
 
     end_dt = datetime.datetime.now(datetime.UTC)
-    start_dt = datetime.datetime.combine(
-        INCOME_SYNC_START_DATE, datetime.time.min, tzinfo=datetime.UTC
-    )
+    floor_dt = datetime.datetime.combine(INCOME_SYNC_START_DATE, datetime.time.min, tzinfo=datetime.UTC)
 
+    last_sync_iso = get_income_sync_time()
+
+    if mode == "full" or (mode == "incremental" and last_sync_iso is None):
+        start_dt = floor_dt
+        do_clear = True
+    elif mode == "90d":
+        start_dt = end_dt - datetime.timedelta(days=90)
+        if start_dt < floor_dt:
+            start_dt = floor_dt
+        do_clear = False
+    elif mode == "ytd":
+        start_dt = datetime.datetime(end_dt.year, 1, 1, tzinfo=datetime.UTC)
+        if start_dt < floor_dt:
+            start_dt = floor_dt
+        do_clear = False
+    else:  # incremental with a prior sync
+        last_sync_dt = datetime.datetime.fromisoformat(last_sync_iso).replace(tzinfo=datetime.UTC)
+        start_dt = last_sync_dt - datetime.timedelta(days=90)
+        if start_dt < floor_dt:
+            start_dt = floor_dt
+        do_clear = False
+
+    log.info("Income sync mode=%s start=%s end=%s clear=%s", mode, start_dt.date(), end_dt.date(), do_clear)
     raw_txs = _fetch_transactions_chunked(client, acct_hash, start_dt, end_dt)
 
     # 3a. Build an equity-buy lookup from all TRADE events.
@@ -244,14 +273,15 @@ def run_sync():
     _calculate_pnl(trades)
 
     # 8. Write to DB
-    clear_income_trades()
+    if do_clear:
+        clear_income_trades()
     for trade in trades:
         legs_data = trade.pop("_legs")
         upsert_income_trade(trade, legs_data)
 
     set_income_sync_time()
-    log.info("Sync complete: %d trades written", len(trades))
-    return {"trades_synced": len(trades)}
+    log.info("Sync complete: %d trades written (mode=%s)", len(trades), mode)
+    return {"trades_synced": len(trades), "mode": mode, "start_date": start_dt.date().isoformat()}
 
 
 # ── FIFO Matching ─────────────────────────────────────────────────────────────

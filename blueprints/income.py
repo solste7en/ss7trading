@@ -35,13 +35,23 @@ def _income_date_bounds_from_request():
     return (a or ""), (b or "")
 
 
+_VALID_SYNC_MODES = {"incremental", "90d", "ytd", "full"}
+
+
 @bp.route("/api/income/sync", methods=["POST"])
 def api_income_sync():
-    """Trigger a full re-sync of income trades from Schwab API."""
+    """Trigger a sync of income trades from Schwab API.
+
+    Accepts optional JSON body: {"mode": "incremental"|"90d"|"ytd"|"full"}
+    """
+    body = request.get_json(silent=True) or {}
+    mode = body.get("mode", "incremental")
+    if mode not in _VALID_SYNC_MODES:
+        return jsonify({"error": f"Invalid mode. Choose from: {sorted(_VALID_SYNC_MODES)}"}), 400
     if not _income_sync_lock.acquire(blocking=False):
         return jsonify({"error": "Sync already in progress"}), 409
     try:
-        result = run_income_sync()
+        result = run_income_sync(mode=mode)
         return jsonify({"ok": True, **result})
     except Exception as e:
         log.exception("API error")

@@ -267,9 +267,17 @@
     </div>
     <div class="ip-sync-area">
       <span id="ip-last-sync" class="ip-sync-time"></span>
-      <button id="ip-sync-btn" class="ip-sync-btn" onclick="syncIncome()">
-        <span id="ip-sync-icon">&#8635;</span> Sync from Schwab
-      </button>
+      <div class="ip-sync-split" id="ip-sync-split">
+        <button id="ip-sync-btn" class="ip-sync-main-btn" onclick="syncIncome('incremental')">
+          <span id="ip-sync-icon">&#8635;</span> Sync from Schwab
+        </button>
+        <button class="ip-sync-caret-btn" id="ip-sync-caret" onclick="toggleSyncDropdown(event)" aria-label="More sync options">&#9660;</button>
+        <div class="ip-sync-dropdown" id="ip-sync-dropdown" style="display:none">
+          <button onclick="syncIncome('90d')">Sync last 90 days</button>
+          <button onclick="syncIncome('ytd')">Sync full year (since Jan 1)</button>
+          <button onclick="syncIncome('full')" class="ip-sync-destructive">Full resync (since Jan 1, 2025)</button>
+        </div>
+      </div>
     </div>
   </div>
 

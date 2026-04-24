@@ -23,7 +23,7 @@ import {
 } from './history.js';
 import {
   loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
-  toggleIncomeTrade, dismissRecovery, syncIncome, _ipOnStatusChange,
+  toggleIncomeTrade, dismissRecovery, syncIncome, toggleSyncDropdown, _ipOnStatusChange,
   onIpDateRangeChange, onIpCustomDateChange,
   toggleRecoverySummary,
 } from './income.js';
@@ -81,7 +81,7 @@ Object.assign(window, {
   loadHistory, closeSyncModal, syncTrades, loadGains, renderPagination,
   // income
   loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
-  toggleIncomeTrade, dismissRecovery, syncIncome, _ipOnStatusChange,
+  toggleIncomeTrade, dismissRecovery, syncIncome, toggleSyncDropdown, _ipOnStatusChange,
   onIpDateRangeChange, onIpCustomDateChange, toggleRecoverySummary,
   // trade
   setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
