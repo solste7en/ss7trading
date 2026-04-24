@@ -273,7 +273,7 @@ export function _renderIncomeTrades(trades) {
 
     html += `<tr class="ip-trade-row" onclick="toggleIncomeTrade(${t.id},'${esc(t.underlying)}','${esc(t.status)}')" style="cursor:pointer">
       <td class="ip-toggle-arrow">${arrow}</td>
-      <td><b>${esc(t.underlying)}</b></td>
+      <td><b class="sym-link" onclick="event.stopPropagation(); openTrade('${esc(t.underlying)}')">${esc(t.underlying)}</b></td>
       <td>${stratBadge}</td>
       <td class="ip-legs-cell">${esc(legsSummary)}</td>
       <td class="ip-recovery-cell">${t.status === 'assigned' ? recCell : '—'}</td>

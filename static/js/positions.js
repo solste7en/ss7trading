@@ -355,7 +355,7 @@ export function _renderPositions() {
       symbolCell = `<span class="pos-opt-symbol" title="${esc(p.symbol)}">${strikeLabel}</span>`;
       expiryCell = `<span class="pos-opt-expiry${_isExpiringSoon(p.option_expiry) ? ' pos-expiry-soon' : ''}">${fmtExpiry(p.option_expiry)}</span>`;
     } else {
-      symbolCell = `<b>${esc(p.symbol)}</b>`;
+      symbolCell = `<b class="sym-link" onclick="openTrade('${esc(p.symbol)}')">${esc(p.symbol)}</b>`;
       expiryCell = '';
     }
     const earnSym = isChild ? underlyingKey : p.symbol;
@@ -417,7 +417,7 @@ export function _renderPositions() {
     return `<tr class="${trClass}" data-expand-underlying="${esc(underlying)}" data-list-id="${listId}" data-pos-block="${esc(underlying)}">
       ${firstToggleTd}
       <td colspan="4" class="pos-toggle-label">
-        <span class="pos-toggle-ticker">${esc(underlying)}</span>
+        <span class="pos-toggle-ticker sym-link" onclick="event.stopPropagation(); openTrade('${esc(underlying)}')">${esc(underlying)}</span>
         <span class="pos-toggle-meta">${optCount} option position${optCount !== 1 ? 's' : ''}</span>
       </td>
       <td class="pos-earnings-cell">${_earnForSym(underlying)}</td>

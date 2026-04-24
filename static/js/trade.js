@@ -2,6 +2,14 @@ import { fmt, fmtD, cls, esc, fetchJson } from './utils.js';
 import { store as S } from './state.js';
 import { findChainContract, makeStrikeSelectOptions } from './optionChainHelpers.js';
 
+/** Navigate to the Trade tab and pre-fill the equity ticker. */
+export function openTrade(symbol) {
+  window.switchTab('trade');
+  setTradeMode('equity');
+  document.getElementById('eq-ticker').value = symbol;
+  onTradeTickerChange();
+}
+
 export function setTradeMode(mode) {
   S.tradeMode = mode;
   document.getElementById('btn-equity').classList.toggle('active', mode === 'equity');

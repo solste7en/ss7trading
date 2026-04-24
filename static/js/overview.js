@@ -55,7 +55,7 @@ export async function loadOverview() {
 
       return `<div class="${cardClass}" id="tcard-${t.symbol}">
         <div class="ticker-card-header">
-          <h3>${esc(t.symbol)}</h3>
+          <h3 class="sym-link" onclick="openTrade('${esc(t.symbol)}')">${esc(t.symbol)}</h3>
           ${earnHdr}
           <span class="trade-count">${countLabel}</span>
           <button class="btn-ladder" onclick="openLadder('${t.symbol}')">Ladder</button>

@@ -28,7 +28,7 @@ import {
   toggleRecoverySummary,
 } from './income.js';
 import {
-  setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
+  openTrade, setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
   previewOrder, submitPendingOrder, clearTradeResult, showTradeError,
   loadTradeQuote, loadTradingViewChart, loadOptionExpirations,
   loadOptionChain, onChainClick, loadPositionSummaryForTicker,
@@ -84,7 +84,7 @@ Object.assign(window, {
   toggleIncomeTrade, dismissRecovery, syncIncome, toggleSyncDropdown, _ipOnStatusChange,
   onIpDateRangeChange, onIpCustomDateChange, toggleRecoverySummary,
   // trade
-  setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
+  openTrade, setTradeMode, onTradeTickerChange, updateEqFields, updateOptFields,
   previewOrder, submitPendingOrder, clearTradeResult, showTradeError,
   loadTradeQuote, loadTradingViewChart, loadOptionExpirations,
   loadOptionChain, onChainClick, loadPositionSummaryForTicker,

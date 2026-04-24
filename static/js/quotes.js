@@ -176,7 +176,7 @@ function _quoteRowHtml(q, id, isCustom) {
   const ed = S._qEarnMap[String(q.symbol || '').toUpperCase()];
   const earnHtml = earningsTagHtml(ed, { symbol: q.symbol });
   return `<tr>
-      <td><b>${esc(q.symbol)}</b></td>
+      <td><b class="sym-link" onclick="openTrade('${esc(q.symbol)}')">${esc(q.symbol)}</b></td>
       <td class="q-earnings-cell">${earnHtml}</td>
       <td>$${fmt(q.last)}</td>
       <td>${q.bid != null ? '$' + fmt(q.bid) : '—'}</td>
