@@ -34,6 +34,7 @@ import {
   loadOptionChain, onChainClick, loadPositionSummaryForTicker,
   clearPositionPanel, syncTradeTicker,
   onTradeExpiryChange, onTradeOptContextChange, onTradeStrikeChange,
+  loadTradeOrders, cancelTradeOrder,
 } from './trade.js';
 import {
   renderRungs, addRung, removeRung, updateLadderSummary,
@@ -90,6 +91,7 @@ Object.assign(window, {
   loadOptionChain, onChainClick, loadPositionSummaryForTicker,
   clearPositionPanel, syncTradeTicker,
   onTradeExpiryChange, onTradeOptContextChange, onTradeStrikeChange,
+  loadTradeOrders, cancelTradeOrder,
   // ladder
   renderRungs, addRung, removeRung, updateLadderSummary,
   ladderEvenSplit, ladderScaleUp, ladderScaleDown,

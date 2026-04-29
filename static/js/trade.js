@@ -1,5 +1,6 @@
 import { fmt, fmtD, cls, esc, fetchJson } from './utils.js';
 import { store as S } from './state.js';
+import { enrichOrders, renderOrders } from './orders.js';
 import { findChainContract, makeStrikeSelectOptions } from './optionChainHelpers.js';
 
 /** Navigate to the Trade tab and pre-fill the equity ticker. */
@@ -150,6 +151,53 @@ export async function loadPositionSummaryForTicker(ticker, panelId) {
   }
 }
 
+export async function loadTradeOrders(ticker) {
+  const el = document.getElementById('trade-orders-panel');
+  if (!el) return;
+  if (!ticker) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  el.style.display = '';
+  el.innerHTML = '<div class="pos-sum-panel-loading">Loading orders…</div>';
+  try {
+    const raw = await fetch('/api/orders').then(r => r.json());
+    if (raw.error) throw new Error(raw.error);
+    const t = ticker.trim().toUpperCase();
+    const orders = raw.filter(o => o.underlying === t || o.symbol === t || (o.underlying || '').startsWith(t));
+    if (!orders.length) {
+      el.innerHTML =
+        '<div class="pos-sum-panel-header">Open Orders</div>' +
+        '<div class="pos-sum-none">No open orders for ' + esc(t) + '</div>';
+      return;
+    }
+    const ctx = await enrichOrders(orders);
+    const countStr = orders.length + ' open order' + (orders.length !== 1 ? 's' : '');
+    el.innerHTML =
+      '<div class="pos-sum-panel-header">Open Orders <span style="color:#64748b;font-size:11px;font-weight:400">' + countStr + '</span></div>' +
+      '<div id="trade-orders-container"></div>';
+    renderOrders('trade-orders-container', null, orders, {
+      variant: 'ladder',
+      ctx,
+      cancelHandlerName: 'cancelTradeOrder',
+    });
+  } catch (e) {
+    el.innerHTML = '<div class="pos-sum-err">Orders error: ' + esc(e.message) + '</div>';
+  }
+}
+
+export async function cancelTradeOrder(orderId) {
+  if (!confirm('Cancel order ' + orderId + '?')) return;
+  try {
+    const res = await fetch('/api/order/' + orderId, { method: 'DELETE' }).then(r => r.json());
+    if (res.error) throw new Error(res.error);
+    await loadTradeOrders(S._tradeTicker);
+  } catch (e) {
+    alert('Failed to cancel: ' + e.message);
+  }
+}
+
 export function onTradeTickerChange() {
   syncTradeTicker();
   const ticker = (S.tradeMode === 'equity'
@@ -158,6 +206,7 @@ export function onTradeTickerChange() {
   if (!ticker) {
     S._tradeTicker = '';
     clearPositionPanel('trade-position-panel');
+    loadTradeOrders('');
     resetTradeQuotePlaceholder();
     resetTradeChartPlaceholder();
     const chainSel = document.getElementById('chain-expiry');
@@ -179,6 +228,7 @@ export function onTradeTickerChange() {
   S._tradeTicker = ticker;
   loadTradeQuote(ticker);
   loadPositionSummaryForTicker(ticker, 'trade-position-panel');
+  loadTradeOrders(ticker);
   if (changed) loadTradingViewChart(ticker);
   if (S.tradeMode === 'option' && changed) loadOptionExpirations(ticker);
 }
