@@ -22,7 +22,6 @@ Usage:
 
 import argparse
 import logging
-import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -96,42 +95,7 @@ def clean_money(val):
     except (ValueError, TypeError):
         return None
 
-def parse_option_symbol(symbol: str):
-    """
-    Parse option symbol in either format:
-    - Schwab CSV:  'NVDA 03/27/2026 177.50 P'
-    - Schwab API (OCC 21-char): 'NVDA  260327P00177500'
-    Returns option fields dict, or None if not an option.
-    """
-    s = symbol.strip()
-
-    # CSV format: 'NVDA 03/27/2026 177.50 P'
-    m = re.match(r"^(\S+)\s+(\d{2}/\d{2}/\d{4})\s+([\d.]+)\s+([CP])$", s)
-    if m:
-        return {
-            "underlying":    m.group(1),
-            "option_expiry": datetime.strptime(m.group(2), "%m/%d/%Y").strftime("%Y-%m-%d"),
-            "option_strike": float(m.group(3)),
-            "option_type":   "CALL" if m.group(4) == "C" else "PUT",
-        }
-
-    # OCC API format: 'NVDA  260327C00190000'
-    # underlying (1-6 chars, space-padded) + YYMMDD + C/P + 8-digit strike*1000
-    m = re.match(r"^([A-Z/]+)\s+(\d{6})([CP])(\d{8})$", s)
-    if m:
-        strike = int(m.group(4)) / 1000.0
-        try:
-            expiry = datetime.strptime("20" + m.group(2), "%Y%m%d").strftime("%Y-%m-%d")
-        except ValueError:
-            return None
-        return {
-            "underlying":    m.group(1),
-            "option_expiry": expiry,
-            "option_strike": strike,
-            "option_type":   "CALL" if m.group(3) == "C" else "PUT",
-        }
-
-    return None
+from services.options_parsing import parse_option_symbol  # noqa: E402  (re-export)
 
 OPTION_ACTIONS   = {"Buy to Open","Sell to Open","Buy to Close","Sell to Close",
                     "Expired","Assigned","Exchange or Exercise"}

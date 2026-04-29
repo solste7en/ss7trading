@@ -1,34 +1,8 @@
 """Order cleaning and building."""
 
 import datetime
-import re
 
-_OSI_RE = re.compile(r"^([A-Z/]+)\s+(\d{6})([CP])(\d{8})$")
-
-
-def parse_osi(symbol):
-    """Parse a Schwab OSI option symbol into structured fields.
-
-    Returns ``{underlying, option_type, strike, expiration_date}`` or
-    ``None`` if the input is not an OSI option symbol. Format:
-    ``UNDER  YYMMDD[C|P]00000000`` (strike scaled by 1000, 8 digits).
-    """
-    if not symbol:
-        return None
-    s = symbol.strip()
-    m = _OSI_RE.match(s)
-    if not m:
-        return None
-    try:
-        expiry = datetime.datetime.strptime("20" + m.group(2), "%Y%m%d").date().isoformat()
-    except ValueError:
-        return None
-    return {
-        "underlying": m.group(1),
-        "option_type": "CALL" if m.group(3) == "C" else "PUT",
-        "strike": int(m.group(4)) / 1000.0,
-        "expiration_date": expiry,
-    }
+from services.options_parsing import parse_option_symbol
 
 
 def _trim_iso(s):
@@ -69,12 +43,12 @@ def clean_orders(orders_data):
             }
             leg_under = sym.split()[0] if " " in sym else sym
             if atype == "OPTION":
-                osi = parse_osi(sym)
-                if osi:
-                    entry["option_type"] = osi["option_type"]
-                    entry["strike"] = osi["strike"]
-                    entry["expiration_date"] = osi["expiration_date"]
-                    leg_under = osi["underlying"]
+                parsed = parse_option_symbol(sym)
+                if parsed:
+                    entry["option_type"] = parsed["option_type"]
+                    entry["strike"] = parsed["option_strike"]
+                    entry["expiration_date"] = parsed["option_expiry"]
+                    leg_under = parsed["underlying"]
             if leg_under and leg_under not in seen_under:
                 seen_under.add(leg_under)
                 underlyings.append(leg_under)
