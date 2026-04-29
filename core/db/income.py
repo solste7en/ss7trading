@@ -324,7 +324,9 @@ def get_income_trades(
             from services.recovery import attach_recovery_summaries
             cur.execute(f"SELECT t.* FROM income_trades t {clause} ORDER BY t.id DESC", params)
             trades = [dict(r) for r in cur.fetchall()]
-            _income_attach_legs(cur, trades)
+            # attach_recovery_summaries needs every trade (it groups by
+            # underlying); legs are only needed for the rendered page, so
+            # defer that fetch until after pagination.
             attach_recovery_summaries(trades)
 
             def _rec_frac(t):
@@ -343,9 +345,13 @@ def get_income_trades(
                     return v
                 trades.sort(key=_pnl_key, reverse=rev)
             trades = trades[offset:offset + limit]
+            _income_attach_legs(cur, trades)
         elif sb == "score":
             cur.execute(f"SELECT t.* FROM income_trades t {clause} ORDER BY t.id DESC", params)
             trades = [dict(r) for r in cur.fetchall()]
+            # _income_efficiency_score needs legs to find the short-leg strike;
+            # attach legs to the full set, sort, then re-attach to the visible
+            # page. (Sorted dicts retain their `legs` key.)
             _income_attach_legs(cur, trades)
 
             def _score_key(t):
