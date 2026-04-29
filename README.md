@@ -264,13 +264,15 @@ Results print as a table (mean time, rounds, iterations) in the terminal.
 
 ## Frontend static assets
 
-The dashboard uses no JavaScript bundler: Flask serves [templates/dashboard.html](templates/dashboard.html) with a single script tag.
+The dashboard uses no JavaScript bundler: Flask serves [templates/dashboard.html](templates/dashboard.html) with a single ES-module script tag for **[static/js/main.js](static/js/main.js)**.
 
-- **[static/js/dashboard.js](static/js/dashboard.js)** — All client logic lives in one file so every `onclick="…"` handler in the template can call a **global** function. Near the top, shared helpers include **`fetchJson`** (wraps `fetch`, parses JSON, throws on `error` in the body or non-OK HTTP) and **`ladderResultTableHtml`** (shared table markup for equity ladder and Income strategy-ladder submission results).
+- **[static/js/main.js](static/js/main.js)** — Entry point. Imports per-tab modules (`overview.js`, `positions.js`, `quotes.js`, `history.js`, `income.js`, `trade.js`, `ladder.js`, `orders.js`, `analytics.js`, `strategy.js`, `balance.js`) and exposes the functions inline `onclick="…"` handlers need via `Object.assign(window, …)`. Also wires the theme picker and bootstraps the initial loads.
 
-- **[static/css/style.css](static/css/style.css)** — One stylesheet. A **`:root`** block defines **CSS custom properties** (`--color-*`) for the dark theme; rules reference `var(--color-…)` so palette tweaks stay centralized.
+- **[static/js/utils.js](static/js/utils.js)** — Shared helpers: `fetchJson` (wraps `fetch`, parses JSON, throws on `error` in body or non-OK HTTP), `ladderResultTableHtml` (shared table markup for equity ladder and Income strategy-ladder submission results), formatting helpers (`fmt`, `fmtD`, `cls`, `esc`), and `normalizeQty`.
 
-**If this grows further**, two optional directions (not required today): (1) split into several scripts loaded in a **fixed order** in the template (e.g. utils first, then feature files), still exposing functions on `window` for `onclick`; or (2) add a small **esbuild** (or similar) pipeline that bundles ES modules into one output file and assigns **`window.fnName = …`** for each handler the HTML needs.
+- **[static/js/state.js](static/js/state.js)** — Module-scoped client state (e.g. pagination registry, ladder rungs, custom-ticker state) imported by feature modules.
+
+- **[static/css/style.css](static/css/style.css)** and **[static/css/themes.css](static/css/themes.css)** — Stylesheets. `themes.css` defines CSS custom properties (`--color-*`) per theme; `style.css` references `var(--color-…)`.
 
 ---
 
