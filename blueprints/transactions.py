@@ -21,7 +21,10 @@ def api_transactions():
         category = request.args.get("category", "").strip()
         ticker = request.args.get("ticker", "").strip().upper()
         search = request.args.get("search", "").strip()
-        return jsonify(get_transactions(page, limit, category, ticker, search))
+        sort_by = request.args.get("sort_by", "trade_date").strip()
+        sort_dir = request.args.get("sort_dir", "desc").strip()
+        return jsonify(get_transactions(page, limit, category, ticker, search,
+                                        sort_by, sort_dir))
     except Exception as e:
         log.exception("API error")
         return jsonify({"error": str(e)}), 500
@@ -34,7 +37,10 @@ def api_realized_gains():
         limit = min(100, max(10, int(request.args.get("limit", 25))))
         ticker = request.args.get("ticker", "").strip().upper()
         term = request.args.get("term", "").strip()
-        return jsonify(get_realized_gains(page, limit, ticker, term))
+        sort_by = request.args.get("sort_by", "closed_date").strip()
+        sort_dir = request.args.get("sort_dir", "desc").strip()
+        return jsonify(get_realized_gains(page, limit, ticker, term,
+                                          sort_by, sort_dir))
     except Exception as e:
         log.exception("API error")
         return jsonify({"error": str(e)}), 500

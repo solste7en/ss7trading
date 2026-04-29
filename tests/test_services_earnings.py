@@ -50,9 +50,21 @@ class _FakeTs:
 
 
 def _install_fake_yf(monkeypatch, ticker_factory):
-    """Install a stub ``yfinance`` module exposing ``Ticker``."""
+    """Install a stub ``yfinance`` module exposing ``Ticker`` and ``Tickers``.
+
+    ``Tickers(" ".join(syms))`` is the batch entrypoint used by the cache miss
+    path. We back its ``.tickers`` mapping by calling ``ticker_factory(sym)``
+    lazily so tests can keep counting per-symbol invocations.
+    """
     fake_yf = MagicMock()
     fake_yf.Ticker = ticker_factory
+
+    class _LazyTickers:
+        def __init__(self, joined: str):
+            self._syms = joined.split()
+            self.tickers = {sym: ticker_factory(sym) for sym in self._syms}
+
+    fake_yf.Tickers = _LazyTickers
     monkeypatch.setitem(sys.modules, "yfinance", fake_yf)
 
 

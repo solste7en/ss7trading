@@ -1,6 +1,9 @@
 """Performance benchmarks for critical code paths.
 
-Run with:  pytest tests/test_benchmarks.py --benchmark-only -v
+Opt-in: marked with ``benchmark`` so default ``pytest`` runs skip them.
+Run explicitly with::
+
+    pytest -m benchmark --benchmark-only -v
 """
 import os
 import random
@@ -25,6 +28,8 @@ from tests.conftest import (
     _make_raw_trade_equity,
     _make_raw_trade_option,
 )
+
+pytestmark = pytest.mark.benchmark
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

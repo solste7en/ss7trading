@@ -37,6 +37,9 @@ export const store = {
   _ipExpanded: new Set(),
   _ipCardFilter: null,
   _ipRecoveryCache: {},
+  /** Last fetched trades — used by toggleIncomeTrade to re-render in place
+   *  without refetching from the server. */
+  _ipLastTrades: [],
   incomePnlSort: { key: 'open_date', dir: 'desc' },
 
   tradeMode: 'equity',
@@ -101,8 +104,8 @@ export const store = {
   _qSortDir: 1,
   _qIsCustom: false,
   _qListId: 'positions',
-  historyState: { page: 1, loaded: false },
-  gainsState: { page: 1, loaded: false },
+  historyState: { page: 1, loaded: false, sort_by: 'trade_date', sort_dir: 'desc' },
+  gainsState: { page: 1, loaded: false, sort_by: 'closed_date', sort_dir: 'desc' },
   _paginationRegistry: {},
   stratRecentState: { page: 1 },
 };

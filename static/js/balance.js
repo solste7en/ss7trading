@@ -51,6 +51,22 @@ function fmtVal(v) {
   return esc(String(v));
 }
 
+function _updateTitleNetLiq(accounts, aggregated) {
+  let netLiq = aggregated && typeof aggregated.liquidationValue === 'number'
+    ? aggregated.liquidationValue
+    : null;
+  if (netLiq == null && accounts && accounts.length) {
+    let sum = 0, ok = false;
+    for (const a of accounts) {
+      const v = a.current_balances && a.current_balances.liquidationValue;
+      if (typeof v === 'number') { sum += v; ok = true; }
+    }
+    if (ok) netLiq = sum;
+  }
+  if (netLiq == null) return;
+  document.title = '$' + Math.round(netLiq).toLocaleString('en-US') + ' · ss7trading';
+}
+
 function buildKeyMetrics(accounts, aggregated) {
   const merged = {};
 
@@ -106,6 +122,12 @@ function renderCollapsible(label, obj) {
 }
 
 function initTooltips(container) {
+  // loadBalance calls this on every refresh; bind listeners and tip element
+  // exactly once per container so we don't accumulate handlers and orphaned
+  // tooltip divs in document.body.
+  if (container.dataset.balTipsBound === '1') return;
+  container.dataset.balTipsBound = '1';
+
   const tip = document.createElement('div');
   tip.className = 'bal-tooltip';
   tip.style.display = 'none';
@@ -191,6 +213,9 @@ export async function loadBalance() {
 
     container.innerHTML = snapBar + metricsHtml + acctCards;
     initTooltips(container);
+
+    // Reflect net liq value in the browser tab title for at-a-glance value.
+    _updateTitleNetLiq(accounts, agg);
 
     // Fire snapshot in background — non-blocking
     triggerSnapshot(document.getElementById('bal-snap-status'));

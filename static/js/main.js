@@ -20,6 +20,7 @@ import {
 } from './quotes.js';
 import {
   loadHistory, closeSyncModal, syncTrades, loadGains, renderPagination,
+  setHistorySort, setGainsSort,
 } from './history.js';
 import {
   loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
@@ -80,6 +81,7 @@ Object.assign(window, {
   removeWatchlistSymbol, loadQuotes, sortQuotes, fetchQuote,
   // history
   loadHistory, closeSyncModal, syncTrades, loadGains, renderPagination,
+  setHistorySort, setGainsSort,
   // income
   loadIncomeStats, loadIncomeTrades, setIncomePnlSort, setIpCardFilter,
   toggleIncomeTrade, dismissRecovery, syncIncome, toggleSyncDropdown, _ipOnStatusChange,

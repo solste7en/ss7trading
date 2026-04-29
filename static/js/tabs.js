@@ -2,11 +2,8 @@ import { store } from './state.js';
 
 export function switchTab(name) {
   store.currentTab = name;
-  // Match each tab by extracting its name from the onclick attribute — avoids
-  // any reliance on DOM order which would break after tab reordering.
   document.querySelectorAll('.tab').forEach(t => {
-    const m = (t.getAttribute('onclick') || '').match(/switchTab\('(\w+)'\)/);
-    t.classList.toggle('active', !!(m && m[1] === name));
+    t.classList.toggle('active', t.dataset.tab === name);
   });
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');

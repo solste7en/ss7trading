@@ -1,26 +1,11 @@
 """Position data cleaning and helpers."""
 
-import re
-
 from core.db import get_position_lists
+from services.options_parsing import parse_occ_pair as parse_occ
 
 _ASSET_TYPE_MAP = {
     "COLLECTIVE_INVESTMENT": "ETF",
 }
-
-_OCC_RE = re.compile(
-    r'^(?P<under>.{6})(?P<yy>\d{2})(?P<mm>\d{2})(?P<dd>\d{2})[CP](?P<strike>\d{8})$'
-)
-
-
-def parse_occ(symbol):
-    """Extract (expiry_iso, strike_float) from a 21-char OCC symbol."""
-    m = _OCC_RE.match(symbol.replace(' ', ' ').ljust(21)[:21])
-    if not m:
-        return None, None
-    expiry = f"20{m.group('yy')}-{m.group('mm')}-{m.group('dd')}"
-    strike = int(m.group('strike')) / 1000.0
-    return expiry, strike
 
 
 def clean_positions(accounts_data):

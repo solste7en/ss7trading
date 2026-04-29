@@ -12,7 +12,7 @@ from core.db import (
     get_income_stats,
     get_income_trades,
     get_position_lists,
-    get_watchlist_symbols,
+    get_watchlist_symbols_batch,
     get_watchlists,
 )
 from services.analytics import (
@@ -168,8 +168,9 @@ def api_analytics_consolidation_lists():
             if p.get("asset_type") in ("EQUITY", "ETF"):
                 pos_by_sym[p["symbol"]] = p
 
+        wl_symbols_by_id = get_watchlist_symbols_batch([wl["id"] for wl in watchlists])
         for wl in watchlists:
-            syms = get_watchlist_symbols(wl["id"])
+            syms = wl_symbols_by_id.get(wl["id"], [])
             wl_tickers = []
             for s in syms:
                 held = pos_by_sym.get(s)
@@ -261,7 +262,6 @@ def api_analytics_consolidation_detail(symbol):
         symbols = _equity_symbols(positions)
         sector_map = get_ticker_info_batch(symbols)
 
-        target_info = get_ticker_info(symbol)
         peer_data = get_peers(symbol, sector_map)
 
         target_pos = None
@@ -270,11 +270,21 @@ def api_analytics_consolidation_detail(symbol):
                 target_pos = p
                 break
 
-        peer_fundamentals = {}
+        # Single batch call for target + peers + ETF alternatives. ETF list
+        # depends on target sector/industry, so resolve target_info from the
+        # portfolio sector_map first when possible to avoid an extra round trip.
+        target_info = sector_map.get(symbol) or get_ticker_info(symbol)
+        sector = target_info.get("sector")
+        industry = target_info.get("industry")
+        etfs = get_etf_alternatives(sector, industry) if sector else []
+
         peer_symbols = [pr["symbol"] for pr in peer_data.get("peers", [])]
-        if peer_symbols:
-            peer_fundamentals = get_ticker_info_batch(peer_symbols)
+        batch_symbols = list({symbol, *peer_symbols, *etfs})
+        batch_info = get_ticker_info_batch(batch_symbols) if batch_symbols else {}
+        target_info = batch_info.get(symbol) or target_info
+        peer_fundamentals = {sym: batch_info.get(sym, {}) for sym in peer_symbols}
         peer_fundamentals[symbol] = target_info
+        etf_info = {e: batch_info.get(e, {}) for e in etfs}
 
         all_tickers = [{"symbol": symbol, "market_value": abs((target_pos or {}).get("market_value") or 0),
                         "unrealized_pl": (target_pos or {}).get("unrealized_pl"),
@@ -298,11 +308,6 @@ def api_analytics_consolidation_detail(symbol):
 
         scored = score_consolidation_candidates(all_tickers, peer_fundamentals)
         tax_swaps = suggest_tax_loss_swaps(symbol, {**sector_map, **peer_fundamentals}, target_pos)
-
-        sector = target_info.get("sector")
-        industry = target_info.get("industry")
-        etfs = get_etf_alternatives(sector, industry) if sector else []
-        etf_info = get_ticker_info_batch(etfs) if etfs else {}
 
         return jsonify({
             "symbol": symbol,

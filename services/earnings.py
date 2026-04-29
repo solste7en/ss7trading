@@ -135,60 +135,64 @@ def get_next_earnings(symbols: list[str]) -> dict[str, str | None]:
             ),
             cleaned,
         ).fetchall()
-    finally:
-        conn.close()
 
-    cached: dict[str, tuple[str | None, float]] = {
-        row[0]: (row[1], row[2]) for row in rows
-    }
+        cached: dict[str, tuple[str | None, float]] = {
+            row[0]: (row[1], row[2]) for row in rows
+        }
 
-    for sym in cleaned:
-        if sym in cached:
-            earnings_date, fetched_at = cached[sym]
-            ttl = _ttl_for(earnings_date)
-            if (now - fetched_at) < ttl:
-                out[sym] = earnings_date
+        for sym in cleaned:
+            if sym in cached:
+                earnings_date, fetched_at = cached[sym]
+                ttl = _ttl_for(earnings_date)
+                if (now - fetched_at) < ttl:
+                    out[sym] = earnings_date
+                else:
+                    missing.append(sym)
             else:
                 missing.append(sym)
-        else:
-            missing.append(sym)
 
-    if missing:
-        try:
-            import yfinance as yf
-        except Exception as e:
-            log.warning("yfinance import failed: %s", e)
-            _upsert_many(missing, {s: None for s in missing}, now)
-            for sym in missing:
-                out[sym] = None
-            return out
-
-        fetched: dict[str, str | None] = {}
-        for sym in missing:
-            try:
-                ticker = yf.Ticker(sym)
-                next_date = _next_future_earnings_date(ticker)
-            except Exception as e:
-                log.warning("earnings fetch failed for %s: %s", sym, e)
-                next_date = None
-            fetched[sym] = next_date
-            out[sym] = next_date
-
-        _upsert_many(missing, fetched, now)
+        if missing:
+            fetched = _fetch_batch(missing)
+            out.update(fetched)
+            _upsert_many_conn(conn, missing, fetched, now)
+    finally:
+        conn.close()
 
     return out
 
 
-def _upsert_many(symbols: list[str], values: dict[str, str | None], now: float) -> None:
-    conn = _get_conn()
+def _fetch_batch(symbols: list[str]) -> dict[str, str | None]:
+    """Fetch next earnings dates for *symbols* via yfinance in a single batch."""
     try:
-        conn.executemany(
-            "INSERT OR REPLACE INTO earnings_cache (symbol, earnings_date, fetched_at) VALUES (?, ?, ?)",
-            [(sym, values.get(sym), now) for sym in symbols],
-        )
-        conn.commit()
-    finally:
-        conn.close()
+        import yfinance as yf
+    except Exception as e:
+        log.warning("yfinance import failed: %s", e)
+        return {s: None for s in symbols}
+
+    result: dict[str, str | None] = {}
+    try:
+        tickers = yf.Tickers(" ".join(symbols))
+    except Exception as e:
+        log.warning("yfinance Tickers init failed: %s", e)
+        return {s: None for s in symbols}
+
+    for sym in symbols:
+        try:
+            ticker = tickers.tickers[sym]
+            result[sym] = _next_future_earnings_date(ticker)
+        except Exception as e:
+            log.warning("earnings fetch failed for %s: %s", sym, e)
+            result[sym] = None
+    return result
+
+
+def _upsert_many_conn(conn: sqlite3.Connection, symbols: list[str],
+                      values: dict[str, str | None], now: float) -> None:
+    conn.executemany(
+        "INSERT OR REPLACE INTO earnings_cache (symbol, earnings_date, fetched_at) VALUES (?, ?, ?)",
+        [(sym, values.get(sym), now) for sym in symbols],
+    )
+    conn.commit()
 
 
 def clear_earnings_cache(symbol: str) -> None:

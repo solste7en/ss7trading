@@ -66,26 +66,14 @@ def _ok_resp(json_data):
 
 class TestPositionsBlueprint:
     @patch("blueprints.positions.get_client")
-    def test_api_test(self, mock_gc, client):
-        mock_gc.return_value = _mock_schwab_client()
-        r = client.get("/api/test")
-        assert r.status_code == 200
-        assert r.get_json()["status"] == "ok"
-
-    @patch("blueprints.positions.get_client")
     def test_api_positions(self, mock_gc, client):
+        """Verify clean_positions response shape — not a status smoke test."""
         mock_gc.return_value = _mock_schwab_client()
         r = client.get("/api/positions")
         assert r.status_code == 200
         data = r.get_json()
         assert isinstance(data, list)
         assert data[0]["symbol"] == "NVDA"
-
-    @patch("blueprints.positions.get_position_lists", return_value=[])
-    def test_api_position_lists_get(self, _mock, client):
-        r = client.get("/api/position-lists")
-        assert r.status_code == 200
-        assert "lists" in r.get_json()
 
     def test_api_position_lists_post_empty_name(self, client):
         r = client.post("/api/position-lists", json={"name": ""})
@@ -101,12 +89,6 @@ class TestQuotesBlueprint:
         data = r.get_json()
         assert data["symbol"] == "NVDA"
         assert data["last"] == 180.0
-
-    @patch("blueprints.quotes.get_watchlist_symbols", return_value=[])
-    def test_api_quotes_empty_list(self, _mock, client):
-        r = client.get("/api/quotes/list/1")
-        assert r.status_code == 200
-        assert r.get_json() == []
 
     @patch("blueprints.quotes.get_client")
     def test_api_quotes_symbols(self, mock_gc, client):
@@ -127,17 +109,6 @@ class TestQuotesBlueprint:
         r = client.get("/api/quotes/symbols?symbols=" + big)
         assert r.status_code == 400
 
-    @patch("blueprints.quotes.get_next_earnings", return_value={"AAPL": "2026-05-01"})
-    def test_api_earnings(self, _mock, client):
-        r = client.get("/api/earnings?symbols=AAPL")
-        assert r.status_code == 200
-        assert r.get_json() == {"AAPL": "2026-05-01"}
-
-    def test_api_earnings_empty(self, client):
-        r = client.get("/api/earnings")
-        assert r.status_code == 200
-        assert r.get_json() == {}
-
     def test_api_earnings_too_many(self, client):
         big = ",".join(f"T{i}" for i in range(60))
         r = client.get("/api/earnings?symbols=" + big)
@@ -145,43 +116,12 @@ class TestQuotesBlueprint:
 
 
 class TestWatchlistsBlueprint:
-    @patch("blueprints.watchlists.get_watchlists", return_value=[])
-    def test_api_watchlists_get(self, _mock, client):
-        r = client.get("/api/watchlists")
-        assert r.status_code == 200
-        assert r.get_json() == []
-
     def test_api_watchlists_post_no_name(self, client):
         r = client.post("/api/watchlists", json={})
         assert r.status_code == 400
 
 
-class TestTransactionsBlueprint:
-    @patch("blueprints.transactions.get_transactions", return_value={"data": [], "page": 1, "pages": 0, "total": 0})
-    def test_api_transactions(self, _mock, client):
-        r = client.get("/api/transactions")
-        assert r.status_code == 200
-        assert r.get_json()["total"] == 0
-
-    @patch("blueprints.transactions.get_realized_gains", return_value={"data": [], "page": 1, "pages": 0, "total": 0})
-    def test_api_realized_gains(self, _mock, client):
-        r = client.get("/api/realized_gains")
-        assert r.status_code == 200
-
-    @patch("blueprints.transactions.get_top_tickers", return_value={"tickers": []})
-    def test_api_top_tickers(self, _mock, client):
-        r = client.get("/api/top-tickers")
-        assert r.status_code == 200
-
-
 class TestOrdersBlueprint:
-    @patch("blueprints.orders.get_client")
-    def test_api_orders(self, mock_gc, client):
-        mock_gc.return_value = _mock_schwab_client()
-        r = client.get("/api/orders")
-        assert r.status_code == 200
-        assert r.get_json() == []
-
     def test_api_place_order_unknown_type(self, client):
         r = client.post("/api/order", json={"trade_type": "unknown"})
         assert r.status_code == 400
@@ -330,3 +270,47 @@ class TestDashboardRoute:
         r = client.get("/")
         assert r.status_code == 200
         assert b"dashboard" in r.data.lower()
+
+
+# Replaces a batch of "GET endpoint and assert 200" smoke tests. Catches the
+# same class of regression (blueprint failed to register, route renamed) by
+# introspecting the live Flask app's URL map.
+@pytest.mark.parametrize("rule", [
+    "/api/test",
+    "/api/positions",
+    "/api/position-lists",
+    "/api/quote/<symbol>",
+    "/api/quotes/list/<int:list_id>",
+    "/api/quotes/symbols",
+    "/api/earnings",
+    "/api/earnings/<symbol>",
+    "/api/watchlists",
+    "/api/transactions",
+    "/api/realized_gains",
+    "/api/top-tickers",
+    "/api/orders",
+    "/api/order",
+    "/api/order/ladder",
+    "/api/order/strategy-ladder",
+    "/api/option-expirations/<symbol>",
+    "/api/option-chain",
+    "/api/ladder-suggest",
+    "/api/strategy-suggest",
+    "/api/trades/last-sync",
+    "/api/income/sync",
+    "/api/income/trades",
+    "/api/income/stats",
+    "/api/income/recovery",
+    "/api/income/timeseries",
+    "/api/account-balances",
+    "/api/account-balances/snapshot",
+    "/api/account-balances/history",
+    "/api/analytics/performance",
+    "/api/analytics/exposure",
+    "/api/analytics/concentration",
+    "/api/analytics/consolidation",
+])
+def test_blueprint_route_registered(rule):
+    """Every expected route must appear in the live url_map."""
+    rules = {r.rule for r in app.url_map.iter_rules()}
+    assert rule in rules, f"Route {rule} not registered (blueprint missing?)"

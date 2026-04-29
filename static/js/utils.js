@@ -71,3 +71,16 @@ export function ladderResultTableHtml(results, options) {
 }
 
 export function round2(v) { return Math.round(v * 100) / 100; }
+
+let _toastTimer = null;
+function _showToast(msg, kind, ms) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.className = 'toast toast-' + kind;
+  t.style.display = '';
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { t.style.display = 'none'; _toastTimer = null; }, ms);
+}
+export function showError(msg)   { _showToast(msg, 'error', 5000); }
+export function showSuccess(msg) { _showToast(msg, 'success', 2500); }

@@ -431,7 +431,7 @@ class TestAnalyticsRoutes:
     @patch("blueprints.analytics.get_all_position_assignments", return_value={"NVDA": 1})
     @patch("blueprints.analytics.get_position_lists", return_value=[{"id": 1, "name": "Core", "sort_order": 1, "is_system": 0}])
     @patch("blueprints.analytics.get_watchlists", return_value=[{"id": 10, "name": "Watch", "symbol_count": 1}])
-    @patch("blueprints.analytics.get_watchlist_symbols", return_value=["AAPL"])
+    @patch("blueprints.analytics.get_watchlist_symbols_batch", return_value={10: ["AAPL"]})
     def test_consolidation_lists_ok(self, _wl_syms, _wls, _pos_lists, _assign, mock_gc, client):
         mock_client = MagicMock()
         mock_client.get_accounts.return_value = _ok_resp([{

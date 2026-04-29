@@ -219,7 +219,8 @@ export async function loadIncomeTrades(resetPage = true) {
     tickersNeedRec.forEach(tk => { delete S._ipRecoveryCache[tk]; });
     await Promise.all(tickersNeedRec.map(u => _fetchRecovery(u)));
 
-    _renderIncomeTrades(res.data);
+    S._ipLastTrades = res.data || [];
+    _renderIncomeTrades(S._ipLastTrades);
     _updateIpSortArrows();
     window.renderPagination('ip-pagination', res, loadIncomeTrades, S.incomePnlState);
     if (_recDashOpen) loadRecoverySummary();
@@ -338,9 +339,15 @@ export async function toggleIncomeTrade(id, ticker, status) {
   } else {
     S._ipExpanded.add(id);
   }
-  // loadIncomeTrades invalidates and refetches recovery for visible tickers,
-  // so we don't need to manage the cache here.
-  loadIncomeTrades(false);
+  // Re-render from the cached trades — no need to refetch /api/income/trades
+  // (the data didn't change, only the expanded-row state did).
+  _renderIncomeTrades(S._ipLastTrades);
+
+  // For assigned trades being expanded for the first time, kick off the
+  // recovery fetch in the background so the recovery section populates.
+  if (S._ipExpanded.has(id) && status === 'assigned' && !S._ipRecoveryCache[ticker]) {
+    _fetchRecovery(ticker).then(() => _renderIncomeTrades(S._ipLastTrades));
+  }
 }
 
 export async function dismissRecovery(tradeId, ticker, remainingQty) {

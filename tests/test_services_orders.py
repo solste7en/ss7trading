@@ -1,48 +1,13 @@
-"""Tests for services/orders.py: OSI parsing and clean_orders enrichment."""
+"""Tests for services/orders.py: clean_orders enrichment.
+
+Parser-level tests live in tests/test_options_parsing.py and tests/test_sync_trades.py.
+"""
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from services.orders import clean_orders, parse_osi
-
-
-class TestParseOsi:
-    def test_put_basic(self):
-        out = parse_osi("NVDA  260327P00177500")
-        assert out == {
-            "underlying": "NVDA",
-            "option_type": "PUT",
-            "strike": 177.5,
-            "expiration_date": "2026-03-27",
-        }
-
-    def test_call_basic(self):
-        out = parse_osi("AAPL  270115C00200000")
-        assert out["option_type"] == "CALL"
-        assert out["strike"] == 200.0
-        assert out["expiration_date"] == "2027-01-15"
-
-    def test_decimal_strike(self):
-        out = parse_osi("SPY   240419P00450125")
-        assert out["strike"] == 450.125
-
-    def test_multi_digit_strike(self):
-        out = parse_osi("BRK   261218C00050000")  # $50 call
-        assert out["strike"] == 50.0
-
-    def test_high_strike(self):
-        out = parse_osi("NVDA  260327C01000000")  # $1000 strike
-        assert out["strike"] == 1000.0
-
-    def test_invalid_returns_none(self):
-        assert parse_osi("NVDA") is None
-        assert parse_osi("") is None
-        assert parse_osi(None) is None
-        assert parse_osi("not an option") is None
-
-    def test_invalid_date_returns_none(self):
-        assert parse_osi("NVDA  269999P00177500") is None
+from services.orders import clean_orders
 
 
 class TestCleanOrders:

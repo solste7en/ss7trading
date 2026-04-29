@@ -4,6 +4,14 @@ All notable changes to ss7trading are documented here.
 
 ---
 
+## [Unreleased]
+
+### Removed
+
+- **`static/js/dashboard.js`** — Deleted the 4,729-line legacy bundle. Frontend has been split into per-tab ES modules loaded via `static/js/main.js` for some time; `dashboard.js` was no longer referenced by any HTML/JS/Python file but had not been cleaned up. README updated to point at `main.js` as the entry point.
+
+---
+
 ## [0.3.1] — 2026-04-16
 
 Income P&L maintenance and correctness: historical sync window, date filtering in the UI and API, spread exercise vs assignment handling, recovery KPI semantics, and early-assignment tagging that survives spread close-out.

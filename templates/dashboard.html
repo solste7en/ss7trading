@@ -37,27 +37,27 @@
 <div class="tabs">
   <div class="tab-group">
     <span class="tab-group-label">Insight</span>
-    <div class="tab active" onclick="switchTab('positions')">📋 Positions</div>
-    <div class="tab"        onclick="switchTab('overview')">🔦 Spotlight</div>
-    <div class="tab"        onclick="switchTab('balance')">🏦 Balance</div>
-    <div class="tab"        onclick="switchTab('analytics')">📊 Analytics</div>
-    <div class="tab"        onclick="switchTab('consolidation')">🔍 Consolidate</div>
-    <div class="tab"        onclick="switchTab('quotes')">💬 Quote</div>
+    <div class="tab active" data-tab="positions"     onclick="switchTab('positions')">📋 Positions</div>
+    <div class="tab"        data-tab="overview"      onclick="switchTab('overview')">🔦 Spotlight</div>
+    <div class="tab"        data-tab="balance"       onclick="switchTab('balance')">🏦 Balance</div>
+    <div class="tab"        data-tab="analytics"     onclick="switchTab('analytics')">📊 Analytics</div>
+    <div class="tab"        data-tab="consolidation" onclick="switchTab('consolidation')">🔍 Consolidate</div>
+    <div class="tab"        data-tab="quotes"        onclick="switchTab('quotes')">💬 Quote</div>
   </div>
   <div class="tab-group-sep"></div>
   <div class="tab-group">
     <span class="tab-group-label">Trade</span>
-    <div class="tab"        onclick="switchTab('trade')">⚡ Trade</div>
-    <div class="tab"        onclick="switchTab('ladder')">🪜 Ladder</div>
-    <div class="tab"        onclick="switchTab('strategy')">💰 Income</div>
-    <div class="tab"        onclick="switchTab('orders')">📬 Open Orders</div>
+    <div class="tab"        data-tab="trade"         onclick="switchTab('trade')">⚡ Trade</div>
+    <div class="tab"        data-tab="ladder"        onclick="switchTab('ladder')">🪜 Ladder</div>
+    <div class="tab"        data-tab="strategy"      onclick="switchTab('strategy')">💰 Income</div>
+    <div class="tab"        data-tab="orders"        onclick="switchTab('orders')">📬 Open Orders</div>
   </div>
   <div class="tab-group-sep"></div>
   <div class="tab-group">
     <span class="tab-group-label">Records</span>
-    <div class="tab"        onclick="switchTab('history')">🗂️ Trade History</div>
-    <div class="tab"        onclick="switchTab('incomepnl')">📈 Income P&amp;L</div>
-    <div class="tab"        onclick="switchTab('gains')">💹 Realized G/L</div>
+    <div class="tab"        data-tab="history"       onclick="switchTab('history')">🗂️ Trade History</div>
+    <div class="tab"        data-tab="incomepnl"     onclick="switchTab('incomepnl')">📈 Income P&amp;L</div>
+    <div class="tab"        data-tab="gains"         onclick="switchTab('gains')">💹 Realized G/L</div>
   </div>
 </div>
 
@@ -213,9 +213,17 @@
   <div id="h-error" class="error" style="display:none"></div>
   <div class="table-wrap" id="h-table" style="display:none">
     <table><thead><tr>
-      <th>Date</th><th>Action</th><th>Category</th><th>Ticker</th>
-      <th>Symbol</th><th>Opt Type</th><th>Strike</th><th>Expiry</th>
-      <th>Qty</th><th>Price</th><th>Fees</th><th>Amount</th><th>Source</th>
+      <th class="sortable" data-sort="trade_date" onclick="setHistorySort('trade_date')">Date <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="action"     onclick="setHistorySort('action')">Action <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="category"   onclick="setHistorySort('category')">Category <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="underlying" onclick="setHistorySort('underlying')">Ticker <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="symbol"     onclick="setHistorySort('symbol')">Symbol <span class="sort-arrow"></span></th>
+      <th>Opt Type</th><th>Strike</th><th>Expiry</th>
+      <th class="sortable" data-sort="quantity"   onclick="setHistorySort('quantity')">Qty <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="price"      onclick="setHistorySort('price')">Price <span class="sort-arrow"></span></th>
+      <th>Fees</th>
+      <th class="sortable" data-sort="amount"     onclick="setHistorySort('amount')">Amount <span class="sort-arrow"></span></th>
+      <th>Source</th>
     </tr></thead><tbody id="h-tbody"></tbody></table>
   </div>
   <div class="pagination" id="h-pagination"></div>
@@ -393,10 +401,17 @@
   <div id="g-error" class="error" style="display:none"></div>
   <div class="table-wrap" id="g-table" style="display:none">
     <table><thead><tr>
-      <th>Closed</th><th>Symbol</th><th>Ticker</th><th>Type</th>
-      <th>Qty</th><th>Proceeds</th><th>Cost Basis</th>
-      <th>Total G/L</th><th>Total G/L %</th>
-      <th>LT G/L</th><th>ST G/L</th>
+      <th class="sortable" data-sort="closed_date"  onclick="setGainsSort('closed_date')">Closed <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="symbol"       onclick="setGainsSort('symbol')">Symbol <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="underlying"   onclick="setGainsSort('underlying')">Ticker <span class="sort-arrow"></span></th>
+      <th>Type</th>
+      <th class="sortable" data-sort="quantity"     onclick="setGainsSort('quantity')">Qty <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="proceeds"     onclick="setGainsSort('proceeds')">Proceeds <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="cost_basis"   onclick="setGainsSort('cost_basis')">Cost Basis <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="total_gl_amt" onclick="setGainsSort('total_gl_amt')">Total G/L <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="total_gl_pct" onclick="setGainsSort('total_gl_pct')">Total G/L % <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="lt_gl_amt"    onclick="setGainsSort('lt_gl_amt')">LT G/L <span class="sort-arrow"></span></th>
+      <th class="sortable" data-sort="st_gl_amt"    onclick="setGainsSort('st_gl_amt')">ST G/L <span class="sort-arrow"></span></th>
       <th>Wash Sale</th><th>Disallowed</th>
     </tr></thead><tbody id="g-tbody"></tbody></table>
   </div>
@@ -1122,6 +1137,10 @@
     <canvas id="pos-pie-mini-canvas" width="240" height="240"></canvas>
   </div>
 </div>
+
+<!-- Global toast (used by showError / showSuccess in utils.js) -->
+<div id="toast" class="toast" style="display:none" role="status" aria-live="polite"></div>
+
 <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>
