@@ -10,18 +10,35 @@ from datetime import date, datetime, timedelta
 
 from core.config import DB_PATH
 
+# PRAGMAs that change DB-level state (journal_mode) are applied once per
+# process; per-connection PRAGMAs are applied on every connect.
+_PRAGMAS_BOOTSTRAPPED = False
+
+
+def _bootstrap_pragmas(conn: sqlite3.Connection) -> None:
+    """Apply PRAGMAs. journal_mode=WAL persists in the DB header so we only set
+    it once per process; the rest are per-connection and cheap to re-apply."""
+    global _PRAGMAS_BOOTSTRAPPED
+    if not _PRAGMAS_BOOTSTRAPPED:
+        conn.execute("PRAGMA journal_mode=WAL")
+        _PRAGMAS_BOOTSTRAPPED = True
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA cache_size=-20000")
+    conn.execute("PRAGMA foreign_keys=ON")
+
 
 def _connect():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    _bootstrap_pragmas(conn)
     return conn
 
 
 @contextmanager
 def _connection():
     """Context manager that guarantees the connection is closed even on exception."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = _connect()
     try:
         yield conn
     finally:
@@ -984,6 +1001,26 @@ def get_watchlist_symbols(list_id):
             (list_id,),
         )
         return [r["symbol"] for r in cur.fetchall()]
+
+
+def get_watchlist_symbols_batch(list_ids):
+    """Return ``{list_id: [symbol, ...]}`` for the given list_ids in one query."""
+    ids = [int(i) for i in list_ids]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    with _connection() as conn:
+        _ensure_watchlist_tables(conn)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT watchlist_id, symbol FROM watchlist_symbols "
+            f"WHERE watchlist_id IN ({placeholders}) ORDER BY watchlist_id, symbol",
+            ids,
+        )
+        out = {i: [] for i in ids}
+        for row in cur.fetchall():
+            out[row["watchlist_id"]].append(row["symbol"])
+        return out
 
 
 def add_watchlist_symbol(list_id, symbol):
