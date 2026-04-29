@@ -1,6 +1,9 @@
 """Performance benchmarks for critical code paths.
 
-Run with:  pytest tests/test_benchmarks.py --benchmark-only -v
+Opt-in: marked with ``benchmark`` so default ``pytest`` runs skip them.
+Run explicitly with::
+
+    pytest -m benchmark --benchmark-only -v
 """
 import os
 import random
@@ -9,6 +12,8 @@ import sys
 from contextlib import contextmanager
 
 import pytest
+
+pytestmark = pytest.mark.benchmark
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
