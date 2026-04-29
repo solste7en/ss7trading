@@ -32,7 +32,8 @@ export async function loadHistory(resetPage=true) {
 
   try {
     const params = new URLSearchParams({
-      page: S.historyState.page, limit, ticker, search, category
+      page: S.historyState.page, limit, ticker, search, category,
+      sort_by: S.historyState.sort_by, sort_dir: S.historyState.sort_dir,
     });
     const res  = await fetchJson('/api/transactions?' + params);
     S.historyState.loaded = true;
@@ -62,12 +63,43 @@ export async function loadHistory(resetPage=true) {
 
     document.getElementById('h-loading').style.display='none';
     document.getElementById('h-table').style.display='block';
+    _updateSortArrows('h', S.historyState);
     renderPagination('h-pagination', res, loadHistory);
   } catch(e) {
     document.getElementById('h-loading').style.display='none';
     document.getElementById('h-error').style.display='block';
     document.getElementById('h-error').textContent='Error: '+e.message;
   }
+}
+
+export function setHistorySort(key) {
+  if (S.historyState.sort_by === key) {
+    S.historyState.sort_dir = S.historyState.sort_dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    S.historyState.sort_by = key;
+    S.historyState.sort_dir = 'desc';
+  }
+  loadHistory();
+}
+
+export function setGainsSort(key) {
+  if (S.gainsState.sort_by === key) {
+    S.gainsState.sort_dir = S.gainsState.sort_dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    S.gainsState.sort_by = key;
+    S.gainsState.sort_dir = 'desc';
+  }
+  loadGains();
+}
+
+function _updateSortArrows(prefix, state) {
+  const arrow = state.sort_dir === 'asc' ? '▴' : '▾';
+  const root = document.getElementById('tab-' + (prefix === 'h' ? 'history' : 'gains'));
+  if (!root) return;
+  root.querySelectorAll('th[data-sort] .sort-arrow').forEach(el => {
+    const th = el.closest('th');
+    el.textContent = th && th.dataset.sort === state.sort_by ? arrow : '';
+  });
 }
 
 export function closeSyncModal() {
@@ -156,7 +188,8 @@ export async function loadGains(resetPage=true) {
 
   try {
     const params = new URLSearchParams({
-      page: S.gainsState.page, limit, ticker, term
+      page: S.gainsState.page, limit, ticker, term,
+      sort_by: S.gainsState.sort_by, sort_dir: S.gainsState.sort_dir,
     });
     const res = await fetch('/api/realized_gains?'+params).then(r=>r.json());
     if (res.error) throw new Error(res.error);
@@ -190,6 +223,7 @@ export async function loadGains(resetPage=true) {
 
     document.getElementById('g-loading').style.display='none';
     document.getElementById('g-table').style.display='block';
+    _updateSortArrows('g', S.gainsState);
     renderPagination('g-pagination', res, loadGains);
   } catch(e) {
     document.getElementById('g-loading').style.display='none';

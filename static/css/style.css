@@ -1592,3 +1592,14 @@ tr.pos-dragging td { opacity: 0.55; }
 .an-strat-card-desc { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
 .an-strat-card-detail { font-size: 11px; color: var(--color-text-muted); margin-bottom: 8px; line-height: 1.5; }
 .an-strat-card-metric { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+
+/* ── Global toast (showError / showSuccess) ─────────────────────────────── */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  z-index: 9999; max-width: 480px; padding: 10px 16px; border-radius: 6px;
+  font-size: 13px; line-height: 1.4; box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  border: 1px solid transparent;
+  background: var(--color-surface-elevated);
+}
+.toast-error   { color: var(--color-neg); border-color: var(--color-neg); }
+.toast-success { color: var(--color-pos); border-color: var(--color-pos); }

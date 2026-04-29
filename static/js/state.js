@@ -104,8 +104,8 @@ export const store = {
   _qSortDir: 1,
   _qIsCustom: false,
   _qListId: 'positions',
-  historyState: { page: 1, loaded: false },
-  gainsState: { page: 1, loaded: false },
+  historyState: { page: 1, loaded: false, sort_by: 'trade_date', sort_dir: 'desc' },
+  gainsState: { page: 1, loaded: false, sort_by: 'closed_date', sort_dir: 'desc' },
   _paginationRegistry: {},
   stratRecentState: { page: 1 },
 };

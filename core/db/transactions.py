@@ -12,7 +12,22 @@ def _connection():
     return _db_pkg._connection()
 
 
-def get_transactions(page=1, limit=25, category="", ticker="", search=""):
+_TRANSACTIONS_SORT_MAP = {
+    "trade_date": "trade_date",
+    "action": "action",
+    "category": "category",
+    "underlying": "underlying",
+    "symbol": "symbol",
+    "quantity": "quantity",
+    "price": "price",
+    "amount": "amount",
+}
+
+
+def get_transactions(
+    page=1, limit=25, category="", ticker="", search="",
+    sort_by="trade_date", sort_dir="desc",
+):
     """Paginated transaction history with optional filters."""
     offset = (page - 1) * limit
 
@@ -26,6 +41,8 @@ def get_transactions(page=1, limit=25, category="", ticker="", search=""):
         params += [f"%{search}%", f"%{search}%", f"%{search}%"]
 
     clause = ("WHERE " + " AND ".join(where)) if where else ""
+    order_col = _TRANSACTIONS_SORT_MAP.get((sort_by or "").lower(), "trade_date")
+    order_dir = "ASC" if (sort_dir or "desc").lower() == "asc" else "DESC"
 
     with _connection() as conn:
         cur = conn.cursor()
@@ -39,7 +56,7 @@ def get_transactions(page=1, limit=25, category="", ticker="", search=""):
                    is_option, option_type, option_strike, option_expiry,
                    is_from_option_event, linked_option_action
             FROM transactions {clause}
-            ORDER BY trade_date DESC, id DESC
+            ORDER BY {order_col} {order_dir}, id DESC
             LIMIT ? OFFSET ?
         """, params + [limit, offset])
 
@@ -54,7 +71,24 @@ def get_transactions(page=1, limit=25, category="", ticker="", search=""):
     }
 
 
-def get_realized_gains(page=1, limit=25, ticker="", term=""):
+_REALIZED_GAINS_SORT_MAP = {
+    "closed_date": "closed_date",
+    "underlying": "underlying",
+    "symbol": "symbol",
+    "quantity": "quantity",
+    "proceeds": "proceeds",
+    "cost_basis": "cost_basis",
+    "total_gl_amt": "total_gl_amt",
+    "total_gl_pct": "total_gl_pct",
+    "lt_gl_amt": "lt_gl_amt",
+    "st_gl_amt": "st_gl_amt",
+}
+
+
+def get_realized_gains(
+    page=1, limit=25, ticker="", term="",
+    sort_by="closed_date", sort_dir="desc",
+):
     """Paginated realized gains with optional filters."""
     offset = (page - 1) * limit
 
@@ -67,6 +101,8 @@ def get_realized_gains(page=1, limit=25, ticker="", term=""):
         where.append("st_gl_amt IS NOT NULL")
 
     clause = ("WHERE " + " AND ".join(where)) if where else ""
+    order_col = _REALIZED_GAINS_SORT_MAP.get((sort_by or "").lower(), "closed_date")
+    order_dir = "ASC" if (sort_dir or "desc").lower() == "asc" else "DESC"
 
     with _connection() as conn:
         cur = conn.cursor()
@@ -82,7 +118,7 @@ def get_realized_gains(page=1, limit=25, ticker="", term=""):
                    wash_sale, disallowed_loss,
                    is_option, option_type, option_strike, option_expiry
             FROM realized_gains {clause}
-            ORDER BY closed_date DESC, id DESC
+            ORDER BY {order_col} {order_dir}, id DESC
             LIMIT ? OFFSET ?
         """, params + [limit, offset])
 
