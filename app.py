@@ -7,6 +7,7 @@ Visit: http://127.0.0.1:5050
 import logging
 
 from flask import Flask, jsonify, render_template
+from werkzeug.exceptions import HTTPException
 
 from blueprints.analytics import bp as analytics_bp
 from blueprints.balance import bp as balance_bp
@@ -36,8 +37,18 @@ app.register_blueprint(income_bp)
 
 @app.errorhandler(Exception)
 def handle_exception(e):
+    # Pass HTTP exceptions (404, 405, etc.) through as proper responses
+    # so they don't pollute the error log as if they were 500s.
+    if isinstance(e, HTTPException):
+        return e
     log.exception("Unhandled error")
     return jsonify({"error": str(e)}), 500
+
+
+@app.route("/favicon.ico")
+def favicon():
+    # No favicon yet — return 204 so browsers stop logging 404 noise.
+    return "", 204
 
 
 @app.route("/")
