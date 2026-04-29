@@ -13,8 +13,6 @@ from contextlib import contextmanager
 
 import pytest
 
-pytestmark = pytest.mark.benchmark
-
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from services.sync_trades import (
@@ -30,6 +28,8 @@ from tests.conftest import (
     _make_raw_trade_equity,
     _make_raw_trade_option,
 )
+
+pytestmark = pytest.mark.benchmark
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
