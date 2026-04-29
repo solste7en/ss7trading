@@ -106,6 +106,12 @@ function renderCollapsible(label, obj) {
 }
 
 function initTooltips(container) {
+  // loadBalance calls this on every refresh; bind listeners and tip element
+  // exactly once per container so we don't accumulate handlers and orphaned
+  // tooltip divs in document.body.
+  if (container.dataset.balTipsBound === '1') return;
+  container.dataset.balTipsBound = '1';
+
   const tip = document.createElement('div');
   tip.className = 'bal-tooltip';
   tip.style.display = 'none';

@@ -37,6 +37,9 @@ export const store = {
   _ipExpanded: new Set(),
   _ipCardFilter: null,
   _ipRecoveryCache: {},
+  /** Last fetched trades — used by toggleIncomeTrade to re-render in place
+   *  without refetching from the server. */
+  _ipLastTrades: [],
   incomePnlSort: { key: 'open_date', dir: 'desc' },
 
   tradeMode: 'equity',
